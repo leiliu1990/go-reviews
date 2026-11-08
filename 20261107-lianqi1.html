@@ -149,19 +149,6 @@ body { touch-action: manipulation; margin: 0; background: var(--page); color: va
 .bshell { position: relative; width: 100%; aspect-ratio: 1; }
 #board { width: 100%; height: 100%; display: block; touch-action: manipulation; }
 
-/* ── 本手状态条 ── */
-.hud {
-  display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap;
-  margin: 10px 16px 0; padding: 9px 11px; border-radius: 6px;
-  background: var(--row); border: 1px solid var(--line);
-  font-family: var(--mono); font-size: 14.5px; font-variant-numeric: tabular-nums; color: var(--ink-2);
-}
-.hud b { color: var(--ink); font-weight: 600; }
-.pill { font-size: 13px; font-weight: 600; padding: 2px 8px; border-radius: 10px; letter-spacing: .04em; flex: 0 0 auto; }
-.pill { background: var(--row-alt); color: var(--ink-2); }
-.hud .sc { margin-left: auto; }
-@media (max-width: 420px) { .hud .sc { margin-left: 0; } }
-
 /* ── 走子控件 ── */
 /* 走子控件: 一排大按钮。原来的 range 滑杆在手机上太难精确拖,
    换成 ±1 / ±5 / 首尾 七个键; 跳转仍可点胜率曲线。
@@ -194,7 +181,6 @@ button.nav#next:active { background: var(--accent); }
   flex: 0 0 auto; min-height: 34px; font-size: 13px; padding: 0 12px;
   font-family: var(--sans);
 }
-.hud .n { font-weight: 600; color: var(--ink); }
 
 /* ── 分栏 ── */
 .tabs { display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); }
@@ -342,13 +328,6 @@ footer a:hover { text-decoration: underline; }
 
   <div class="boardwrap">
     <div class="bshell"><canvas id="board"></canvas></div>
-  </div>
-
-  <div class="hud">
-    <span class="pill good" id="hpill">开局</span>
-    <span id="hmove">—</span>
-    <span id="hbest"></span>
-    <span class="sc" id="hsc"></span>
   </div>
 
   <div class="tbar" id="tbar" hidden>
@@ -818,32 +797,6 @@ function nextColor() {
   return hcp ? (cur % 2 === 1 ? "B" : "W") : (cur % 2 === 0 ? "B" : "W");
 }
 
-/* ── 本手状态 ── */
-function renderHud(S) {
-  const sv = sevOf(cur);
-  const pill = document.getElementById("hpill"), mv = document.getElementById("hmove");
-  const best = document.getElementById("hbest"), sc = document.getElementById("hsc");
-  sc.innerHTML = "目数 <b>" + fmtScore(D.analysis[cur] ? D.analysis[cur].scoreLead : null)
-    + "</b> · 提子 黑" + S.caps.B + "/白" + S.caps.W;
-  if (cur === 0) {
-    pill.className = "pill"; pill.style.background = LEVEL_COLORS[1]; pill.style.color = "#fff";
-    pill.textContent = "开局";
-    mv.innerHTML = '第 <span class="n">0</span>/' + NM + " 手";
-    best.textContent = "";
-    return;
-  }
-  const m = D.moves[cur - 1], q = D.quality[cur - 1];
-  const own = (m.color === "B" ? q.deltaWinrate : -q.deltaWinrate) * 100;
-  pill.className = "pill";
-  pill.style.background = levelColor(q.lostWinrate);
-  pill.style.color = "#fff";
-  pill.textContent = sv === "bad" ? "失着" : sv === "warn" ? "缓手" : "好手";
-  mv.innerHTML = '第 <span class="n">' + cur + "</span>/" + NM + " 手 · "
-    + (m.color === "B" ? "黑" : "白") + " <b>" + (m.gtp === "pass" ? "弃手" : m.gtp)
-    + "</b> " + (own >= 0 ? "+" : "") + own.toFixed(1) + "%";
-  best.innerHTML = (sv === "good" || !q.bestMove) ? "" : "推荐 <b>" + q.bestMove + "</b> ▲";
-}
-
 /* ── 胜率曲线 ── */
 const svg = document.getElementById("chart"), tip = document.getElementById("tip");
 const CW = 480, CH = 200, PL = 30, PR = 8, PT = 8, PB = 18;
@@ -942,7 +895,7 @@ function goto(n) {
   trial = null; hover = null;
   document.getElementById("tbar").hidden = true;
   const S = renderBoard();
-  renderBar(); renderHud(S); renderRecommend(); syncBar();
+  renderBar(); renderRecommend(); syncBar();
   const c = document.getElementById("cursor"), d = document.getElementById("cdot");
   if (c) { c.setAttribute("x1", xAt(cur)); c.setAttribute("x2", xAt(cur)); }
   if (d) { d.setAttribute("cx", xAt(cur)); d.setAttribute("cy", yAt(wr(cur))); }
