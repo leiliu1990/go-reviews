@@ -1,4 +1,8 @@
 <meta charset="utf-8">
+<!-- viewport 不能省: 作为 Artifact 发布时平台会自带一个, 但产物也会被当独立页面打开
+     (GitHub Pages / 本地文件), 那时没有它 iOS 会按 980px 宽排版再整体缩到屏宽,
+     缩放比约 0.37 —— 字和棋盘都会小得没法看。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- charset 必须留在文档最前面。发布成 Artifact 时平台自带编码声明, 这行多余但无害;
      而产物同样会被当本地文件直接打开 (微信发文件那条路), 那时没有任何编码声明,
      浏览器只能猜 —— 中文 Windows 上会猜成 GBK, 中文全部乱码。
@@ -95,7 +99,11 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+/* touch-action: manipulation 告诉浏览器本页只需要平移和双指缩放,
+   于是 iOS 不再等"是不是双击" —— 既去掉了误触双击放大, 也顺带消掉了
+   点击的 300ms 延迟。双指缩放不受影响 (不用 user-scalable=no,
+   那个会连双指缩放一起禁掉, 而且 iOS 10+ 出于无障碍考虑本来就忽略它)。 */
+body { touch-action: manipulation; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 .app { max-width: 640px; margin: 0 auto; background: var(--card); min-height: 100vh; }
 .pad { padding-inline: 16px; }
 
