@@ -1,0 +1,969 @@
+<meta charset="utf-8">
+<!-- viewport 不能省: 作为 Artifact 发布时平台会自带一个, 但产物也会被当独立页面打开
+     (GitHub Pages / 本地文件), 那时没有它 iOS 会按 980px 宽排版再整体缩到屏宽,
+     缩放比约 0.37 —— 字和棋盘都会小得没法看。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- charset 必须留在文档最前面。发布成 Artifact 时平台自带编码声明, 这行多余但无害;
+     而产物同样会被当本地文件直接打开 (微信发文件那条路), 那时没有任何编码声明,
+     浏览器只能猜 —— 中文 Windows 上会猜成 GBK, 中文全部乱码。
+     编码嗅探只扫文档前 1024 字节, 且不要求在文档头部区域内, 所以放这里就够。 -->
+<title>棋手1 vs 棋手2</title>
+<!-- 给微信/其他 IM 的链接卡片用: 爬虫不执行 JS, 只能读这些静态标签。
+     og:url 与 og:image 依赖最终发布地址, 由 publish.sh 在发布时注入。 -->
+<meta name="description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 28 手 · 棋谱未记录结果；KataGo 分析：好手 28，缓手 0，失着 0；可逐手走、看推荐着点、试下后续手顺">
+<meta property="og:type" content="article">
+<meta property="og:title" content="棋手1 vs 棋手2">
+<meta property="og:description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 28 手 · 棋谱未记录结果；KataGo 分析：好手 28，缓手 0，失着 0；可逐手走、看推荐着点、试下后续手顺">
+<meta property="og:site_name" content="围棋复盘">
+<meta property="og:url" content="https://leiliu1990.github.io/go-reviews/20261107-lianqi3.html">
+<style>
+/* 弈客围棋直播室形制: 浅灰实用风, 黑白胜率条是标志元素 */
+:root {
+  --page: #ECECEC;
+  --card: #FFFFFF;
+  --row: #F8F8F8;
+  --row-alt: #F2F2F2;
+  --line: #E2E2E2;
+  --ink: #333333;
+  --ink-2: #4C4C4C;
+  --ink-3: #888888;
+  --tab-bg: #F2F2F2;
+  --tab-on: #FFFFFF;
+  --accent: #1A6E4A;
+  --board: #DCB368;
+  --board-line: #654525;
+  --board-label: #553311;
+  --stone-b: #1B1B1B;
+  --stone-b-hi: #52585A;
+  --stone-w: #FBFAF5;
+  --stone-w-lo: #CFC9B8;
+  --bar-b: #000000;
+  --bar-w: #FFFFFF;
+  --bar-edge: #000000;
+  --chart-b: #2A2A2A;
+  --chart-w: #E4E1D8;
+  --good: #1BAF48;
+  --good-bg: #E7F6EC;
+  --behind: #E0534C;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* 纯系统等宽栈: 不依赖外部 CDN (fonts.googleapis.com 在大陆被墙, 会让首屏卡在超时上)。
+     值必须保持单行 —— 它会被 cssVar("--mono") 塞进 canvas 的 ctx.font,
+     带换行的字体串会被 canvas 整体拒绝并静默退回默认字体。 */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #121212;
+    --card: #1C1C1E;
+    --row: #202022;
+    --row-alt: #26262A;
+    --line: #333338;
+    --ink: #E6E6E6;
+    --ink-2: #BFBFBF;
+    --ink-3: #8A8A8E;
+    --tab-bg: #26262A;
+    --tab-on: #1C1C1E;
+    --bar-edge: #5A5A60;
+    --chart-b: #0E0E0F;
+    --chart-w: #C7C2B3;
+    --accent: #58B98A;
+    --board: #C49A54;
+    --board-line: #54381C;
+    --board-label: #46290C;
+    --good: #3FD06C;
+    --good-bg: #13291B;
+    --behind: #F0756E;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #121212;
+  --card: #1C1C1E;
+  --row: #202022;
+  --row-alt: #26262A;
+  --line: #333338;
+  --ink: #E6E6E6;
+  --ink-2: #BFBFBF;
+  --ink-3: #8A8A8E;
+  --tab-bg: #26262A;
+  --tab-on: #1C1C1E;
+  --bar-edge: #5A5A60;
+  --chart-b: #0E0E0F;
+  --chart-w: #C7C2B3;
+  --accent: #58B98A;
+  --board: #C49A54;
+  --board-line: #54381C;
+  --board-label: #46290C;
+  --good: #3FD06C;
+  --good-bg: #13291B;
+  --behind: #F0756E;
+}
+
+* { box-sizing: border-box; }
+/* touch-action: manipulation 告诉浏览器本页只需要平移和双指缩放,
+   于是 iOS 不再等"是不是双击" —— 既去掉了误触双击放大, 也顺带消掉了
+   点击的 300ms 延迟。双指缩放不受影响 (不用 user-scalable=no,
+   那个会连双指缩放一起禁掉, 而且 iOS 10+ 出于无障碍考虑本来就忽略它)。 */
+body { touch-action: manipulation; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.app { max-width: 640px; margin: 0 auto; background: var(--card); min-height: 100vh; }
+.pad { padding-inline: 16px; }
+
+/* ── 赛事条 ── */
+.meet { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+.meet .ev { font-size: 17px; font-weight: 600; line-height: 1.35; text-wrap: balance; }
+.meet .sub { font-family: var(--mono); font-size: 13px; color: var(--ink-3); margin-top: 3px; letter-spacing: .02em; }
+
+/* ── 选手行: 黑左 白右 ── */
+.players { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 0; }
+.side { flex: 1 1 0; min-width: 0; display: flex; gap: 9px; }
+.side.w { flex-direction: row-reverse; text-align: right; }
+.face {
+  flex: 0 0 auto; position: relative; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--row-alt); border: 1px solid var(--line);
+  display: grid; place-items: center; font-size: 15px; font-weight: 600; color: var(--ink-3);
+}
+.face .badge {
+  position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%;
+  border: 1.5px solid var(--card);
+}
+.side.w .face .badge { right: auto; left: -3px; }
+.badge.b { background: radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%); }
+.badge.w { background: radial-gradient(circle at 34% 30%, #FFFFFF, var(--stone-w-lo)); }
+.who { min-width: 0; padding-top: 1px; }
+.nm { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+.wrv { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+/* ── 标志元素: 黑白分割胜率条 ── */
+.vsbar {
+  display: flex; height: 22px; margin: 12px 16px 0;
+  border: 1px solid var(--bar-edge); border-radius: 4px; overflow: hidden;
+  font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.vsbar .l, .vsbar .r { display: grid; place-items: center; min-width: 0; overflow: hidden; transition: width .18s; white-space: nowrap; }
+.vsbar .l { background: var(--bar-b); color: #FFFFFF; }
+.vsbar .r { background: var(--bar-w); color: #000000; }
+
+/* ── 棋盘 ── */
+/* 棋盘满宽 —— 手机上棋盘是主体, 不留左右边距 (.app 最宽 640px, 桌面端也刚好) */
+.boardwrap { padding: 10px 0 0; }
+.bshell { position: relative; width: 100%; aspect-ratio: 1; }
+#board { width: 100%; height: 100%; display: block; touch-action: manipulation; }
+
+/* ── 走子控件 ── */
+/* 走子控件: 一排大按钮。原来的 range 滑杆在手机上太难精确拖,
+   换成 ±1 / ±5 / 首尾 七个键; 跳转仍可点胜率曲线。
+   每个键高 46px —— 比 Apple HIG 的 44pt 最小触摸目标略大。 */
+.transport {
+  display: flex; align-items: stretch; gap: 5px;
+  padding: 10px 10px 12px;
+}
+button.nav {
+  flex: 1 1 0; min-width: 0; min-height: 46px;
+  font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--ink);
+  background: var(--row); border: 1px solid var(--line); border-radius: 7px;
+  padding: 0 2px; cursor: pointer; line-height: 1;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  display: grid; place-items: center;
+}
+button.nav:hover { border-color: var(--accent); color: var(--accent); }
+button.nav:active { background: var(--row-alt); transform: scale(.96); }
+button.nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 「下一手」是用得最多的键: 给两倍宽度并做成主操作色。
+   权重 2 + 其余 5 个各 1 = 7 份; 360px 屏上其余键仍有 ~45px, 不低于 44pt 触摸目标 */
+button.nav#next {
+  flex: 2 1 0; font-size: 20px;
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+button.nav#next:hover { filter: brightness(1.08); color: #fff; }
+button.nav#next:active { background: var(--accent); }
+/* 试下条里的「返回实战」不该跟着走子键一起拉满 */
+.tbar button.nav {
+  flex: 0 0 auto; min-height: 34px; font-size: 13px; padding: 0 12px;
+  font-family: var(--sans);
+}
+
+/* ── 分栏 ── */
+.tabs { display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); }
+.tabs button {
+  flex: 1; appearance: none; border: 0; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 16px; color: var(--ink-2);
+  padding: 14px 4px 12px; position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+.tabs button[aria-selected="true"] { background: var(--tab-on); color: var(--ink); font-weight: 600; }
+.tabs button[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
+  width: 18px; height: 2px; border-radius: 1px; background: var(--accent);
+}
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pane { padding: 0 0 4px; }
+.pane[hidden] { display: none !important; }
+
+/* 推荐着点: 弈客行式列表 (3rem 行高, #f8f8f8 底, 白色分隔) */
+.rrow {
+  display: flex; align-items: center; gap: 12px; min-height: 56px;
+  padding: 0 14px; background: var(--row); border-bottom: 1px solid var(--card);
+  font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums;
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.rrow:nth-child(even) { background: var(--row-alt); }
+.rrow:hover { background: var(--good-bg); }
+.rrow.on { background: var(--good-bg); box-shadow: inset 3px 0 0 var(--good); }
+.rrow.hv { background: var(--good-bg); box-shadow: inset 3px 0 0 var(--ink-3); }
+/* 不优于实战手: 盘上不画, 列表里弱化 */
+.rrow.weak .co, .rrow.weak .wr { color: var(--ink-3); }
+.rrow.weak .chip { opacity: .55; }
+.rrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 编号棋子: 黑子白字 / 白子黑字 */
+.rrow .chip {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+}
+.rrow .chip.b { background: radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%); color: rgba(255,255,255,.9); }
+.rrow .chip.w { background: radial-gradient(circle at 34% 30%, #fff, var(--stone-w-lo)); color: rgba(0,0,0,.7); border: 1px solid var(--line); }
+.rrow .co { font-weight: 600; font-size: 21px; min-width: 2.9em; flex: 0 0 auto; }
+.shizhan { flex: 0 0 auto; color: #fff; font-size: 12.5px; padding: 2px 9px; border-radius: 11px; }
+.rrow .wr { flex: 0 0 auto; font-weight: 600; font-size: 18px; }
+.rrow .sl { flex: 0 0 auto; font-size: 15px; margin-left: auto; }
+.rrow .sl.ahead { color: var(--good); }
+.rrow .sl.behind { color: var(--behind); }
+
+/* 试下条 */
+.tbar {
+  display: flex; align-items: center; gap: 10px; margin: 10px 16px 0;
+  padding: 8px 11px; border-radius: 6px; background: var(--good-bg);
+  border: 1px solid var(--good); font-family: var(--mono); font-size: 14px; color: var(--good);
+}
+.tbar[hidden] { display: none !important; }
+.tbar b { font-weight: 600; }
+.tbar button { margin-left: auto; }
+.tbar button[hidden] { display: none !important; }
+.tbar.preview { background: var(--row-alt); border-color: var(--line); color: var(--ink-2); }
+.phead { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; font-size: 13px; color: var(--ink-3); font-family: var(--mono); }
+.phead .gap { margin-left: auto; }
+
+/* 胜率图 */
+.chartbox { padding: 10px 16px 6px; }
+#chart { display: block; width: 100%; height: auto; aspect-ratio: 480 / 200; overflow: visible; }
+#chart text { font-family: var(--mono); font-size: 12px; fill: var(--ink-3); }
+.cwrap { position: relative; }
+#tip {
+  position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--ink); color: var(--card); border-radius: 4px; padding: 5px 8px;
+  font-family: var(--mono); font-size: 11px; white-space: nowrap;
+  transform: translate(-50%, -100%); z-index: 5; font-variant-numeric: tabular-nums;
+}
+.legend { display: flex; gap: 14px; padding: 0 16px 10px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); flex-wrap: wrap; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+.legend i.ringdemo {
+  width: 12px; height: 12px; border-radius: 50%; background: #248E35;
+  box-shadow: 0 0 0 1.5px var(--card), 0 0 0 3px var(--ink-2); vertical-align: -2px; margin-right: 6px;
+}
+
+/* 失着榜 */
+.mrow {
+  display: flex; align-items: center; gap: 11px; min-height: 52px; padding: 0 14px;
+  background: var(--row); border-bottom: 1px solid var(--card); cursor: pointer;
+  font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+.mrow:nth-child(even) { background: var(--row-alt); }
+.mrow:hover { background: var(--good-bg); }
+.mrow.on { background: var(--good-bg); }
+.mrow .st { width: 20px; height: 20px; border-radius: 50%; flex: 0 0 auto; }
+.mrow .hn { width: 3.2em; color: var(--ink-3); flex: 0 0 auto; }
+.mrow .co { font-weight: 600; font-size: 18px; width: 3.2em; flex: 0 0 auto; }
+.mrow .ls { width: 4.2em; font-weight: 600; flex: 0 0 auto; }
+.mrow .bm { margin-left: auto; color: var(--ink-3); }
+.sect { padding: 11px 16px 8px; font-size: 13.5px; color: var(--ink-3); font-family: var(--mono); background: var(--card); }
+.none { padding: 16px; color: var(--ink-3); font-family: var(--mono); font-size: 14px; }
+
+/* 导出棋谱 */
+.acts { display: flex; gap: 8px; padding: 14px 14px 0; }
+button.act {
+  flex: 1 1 0; min-height: 48px; font-family: var(--sans); font-size: 15px; font-weight: 600;
+  color: var(--ink); background: var(--row); border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.act:active { transform: scale(.97); }
+button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#actmsg { padding: 8px 14px 0; font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); min-height: 1.2em; }
+footer { padding: 14px 16px 28px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); }
+footer div + div { margin-top: 2px; }
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <div class="meet">
+    <div class="ev">日常记录</div>
+    <div class="sub">2026-11-07 · 中国规则 · 贴 7.5 目 · 28 手 · 棋谱未记录结果</div>
+  </div>
+
+  <div class="players">
+    <div class="side b">
+      <div class="face">黑<span class="badge b"></span></div>
+      <div class="who">
+        <div class="nm">棋手1</div>
+        <div class="meta">—</div>
+        <div class="wrv" id="bwr">—</div>
+      </div>
+    </div>
+    <div class="side w">
+      <div class="face">白<span class="badge w"></span></div>
+      <div class="who">
+        <div class="nm">棋手2</div>
+        <div class="meta">—</div>
+        <div class="wrv" id="wwr">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="vsbar" role="img" aria-label="双方胜率" id="vsbar">
+    <div class="l" id="vsl"></div>
+    <div class="r" id="vsr"></div>
+  </div>
+
+  <div class="boardwrap">
+    <div class="bshell"><canvas id="board"></canvas></div>
+  </div>
+
+  <div class="tbar" id="tbar" hidden>
+    <span id="tinfo"></span>
+    <button class="nav" id="texit">返回实战</button>
+  </div>
+
+  <div class="transport">
+    <button class="nav" id="first" title="回到开局 (Home)" aria-label="回到开局">|&lt;</button>
+    <button class="nav" id="back5" title="退五手 (Shift+←)" aria-label="退五手">&lt;&lt;</button>
+    <button class="nav" id="prev" title="上一手 (←)" aria-label="上一手">&lt;</button>
+    <button class="nav" id="next" title="下一手 (→)" aria-label="下一手">&gt;</button>
+    <button class="nav" id="fwd5" title="进五手 (Shift+→)" aria-label="进五手">&gt;&gt;</button>
+    <button class="nav" id="last" title="跳到最后 (End)" aria-label="跳到最后">&gt;|</button>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="t0" aria-selected="true" aria-controls="p0">推荐着点</button>
+    <button role="tab" id="t1" aria-selected="false" aria-controls="p1">胜率图</button>
+    <button role="tab" id="t2" aria-selected="false" aria-controls="p2">缓手失着</button>
+  </div>
+
+  <div class="pane" id="p0" role="tabpanel" aria-labelledby="t0">
+    <div class="phead"><span id="rctx">当前局面</span><span class="gap" id="rgap"></span></div>
+    <div id="rlist"></div>
+  </div>
+
+  <div class="pane" id="p1" role="tabpanel" aria-labelledby="t1" hidden>
+    <div class="chartbox">
+      <div class="cwrap">
+        <svg id="chart" aria-label="逐手胜率曲线"></svg>
+        <div id="tip"></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="ringdemo"></i>实战手(带外圈)</span>
+      <span><i style="background:var(--chart-b)"></i>黑优</span>
+      <span><i style="background:var(--chart-w)"></i>白优</span>
+      <span><i style="background:#82AA28"></i>缓手</span>
+      <span><i style="background:#EB8C00"></i>失着</span>
+      <span><i style="background:rgb(220,0,0)"></i>大失着</span>
+    </div>
+  </div>
+
+  <div class="pane" id="p2" role="tabpanel" aria-labelledby="t2" hidden>
+    <div class="sect">黑方</div><div id="listB"></div>
+    <div class="sect">白方</div><div id="listW"></div>
+  </div>
+
+  <div class="acts">
+    <button class="act primary" id="dlsgf" type="button">导出 SGF</button>
+    <button class="act" id="cpsgf" type="button">复制棋谱</button>
+  </div>
+  <div id="actmsg"></div>
+
+  <footer>
+    <div>KataGo kata1-b18c384nbt-s9996604416-d4316597426 · 200 visits/手 · 缓手 10% / 失着 20%</div>
+    <div>生成于 2026-11-08 16:45 · 来源 本地棋谱 #lianqi3</div>
+  </footer>
+</div>
+
+<script>
+const D = {"meta":{"boardSize":19,"komi":7.5,"rules":"chinese","handicap":0,"initialStones":[]},"moves":[{"color":"B","gtp":"Q16"},{"color":"W","gtp":"D17"},{"color":"B","gtp":"Q3"},{"color":"W","gtp":"D4"},{"color":"B","gtp":"C15"},{"color":"W","gtp":"E16"},{"color":"B","gtp":"C12"},{"color":"W","gtp":"R17"},{"color":"B","gtp":"R16"},{"color":"W","gtp":"Q17"},{"color":"B","gtp":"P16"},{"color":"W","gtp":"O18"},{"color":"B","gtp":"Q6"},{"color":"W","gtp":"F3"},{"color":"B","gtp":"G4"},{"color":"W","gtp":"G3"},{"color":"B","gtp":"N17"},{"color":"W","gtp":"O17"},{"color":"B","gtp":"O16"},{"color":"W","gtp":"N16"},{"color":"B","gtp":"M17"},{"color":"W","gtp":"N15"},{"color":"B","gtp":"K16"},{"color":"W","gtp":"S16"},{"color":"B","gtp":"S15"},{"color":"W","gtp":"S17"},{"color":"B","gtp":"N13"},{"color":"W","gtp":"O14"}],"analysis":[{"winrate":0.3724,"scoreLead":-0.96,"topMoves":[{"move":"Q16","winrate":0.3732,"scoreLead":-0.95,"pv":["Q16","D4","C3","D3","C4"]},{"move":"Q4","winrate":0.3732,"scoreLead":-0.95,"pv":["Q4","D16","C17","D17","C16"]},{"move":"D16","winrate":0.3732,"scoreLead":-0.95,"pv":["D16","Q4","R3","Q3","R4"]}]},{"winrate":0.37,"scoreLead":-0.98,"topMoves":[{"move":"D16","winrate":0.3698,"scoreLead":-0.98,"pv":["D16","C17","D17","C16","D15"]},{"move":"Q4","winrate":0.3698,"scoreLead":-0.98,"pv":["Q4","R3","R4","Q3","P4"]},{"move":"D4","winrate":0.3696,"scoreLead":-0.98,"pv":["D4","Q4","D16","C3","D3"]}]},{"winrate":0.3917,"scoreLead":-0.83,"topMoves":[{"move":"Q4","winrate":0.3925,"scoreLead":-0.8,"pv":["Q4","D4","C3","C4","D3"]},{"move":"D4","winrate":0.3942,"scoreLead":-0.82,"pv":["D4","Q4","C15","E16","R3"]},{"move":"C15","winrate":0.3827,"scoreLead":-0.94,"pv":["C15","D4","Q4","E16","C3"]}]},{"winrate":0.3836,"scoreLead":-0.93,"topMoves":[{"move":"D4","winrate":0.3821,"scoreLead":-0.94,"pv":["D4","C15","C16","D15","F17"]},{"move":"D3","winrate":0.3947,"scoreLead":-0.79,"pv":["D3","C15","D5","E16","E17"]},{"move":"C4","winrate":0.3926,"scoreLead":-0.81,"pv":["C4","E4","E3","F3","D3"]}]},{"winrate":0.3833,"scoreLead":-0.92,"topMoves":[{"move":"C3","winrate":0.3839,"scoreLead":-0.87,"pv":["C3","C4","D3","E4","F3"]},{"move":"C15","winrate":0.3849,"scoreLead":-0.93,"pv":["C15","E16","F3","R5","P4"]},{"move":"F3","winrate":0.3828,"scoreLead":-0.98,"pv":["F3","R5","P4","C14","C6"]}]},{"winrate":0.3845,"scoreLead":-0.93,"topMoves":[{"move":"E16","winrate":0.3836,"scoreLead":-0.93,"pv":["E16","F3","D6","E5","D5"]},{"move":"C16","winrate":0.385,"scoreLead":-0.96,"pv":["C16","D15","F17","C6","C10"]},{"move":"R5","winrate":0.3874,"scoreLead":-0.87,"pv":["R5","E16","E17","F16","G18"]}]},{"winrate":0.383,"scoreLead":-0.94,"topMoves":[{"move":"C3","winrate":0.3849,"scoreLead":-0.9,"pv":["C3","C4","D3","E4","F3"]},{"move":"F3","winrate":0.3851,"scoreLead":-0.96,"pv":["F3","D6","E5","D5","D2"]},{"move":"C6","winrate":0.3805,"scoreLead":-0.99,"pv":["C6","C5","D6","F4","D10"]}]},{"winrate":0.3543,"scoreLead":-1.23,"topMoves":[{"move":"R17","winrate":0.3541,"scoreLead":-1.23,"pv":["R17","R16","Q17","P16","O18"]},{"move":"R5","winrate":0.3533,"scoreLead":-1.25,"pv":["R5","P4","R17","R16","Q17"]},{"move":"R14","winrate":0.3526,"scoreLead":-1.18,"pv":["R14","Q5","O17","Q14","Q13"]}]},{"winrate":0.3529,"scoreLead":-1.22,"topMoves":[{"move":"R16","winrate":0.3541,"scoreLead":-1.2,"pv":["R16","Q17","O17","P17","P16"]},{"move":"Q17","winrate":0.3515,"scoreLead":-1.24,"pv":["Q17","R16","Q15","S14","H17"]},{"move":"C3","winrate":0.3459,"scoreLead":-1.34,"pv":["C3","D3","Q17","R16","Q15"]}]},{"winrate":0.3566,"scoreLead":-1.21,"topMoves":[{"move":"Q17","winrate":0.3567,"scoreLead":-1.21,"pv":["Q17","P16","O18","Q5","R10"]},{"move":"Q4","winrate":0.4138,"scoreLead":-0.55,"pv":["Q4","Q17","R3"]},{"move":"R4","winrate":0.423,"scoreLead":-0.42,"pv":["R4"]}]},{"winrate":0.3566,"scoreLead":-1.2,"topMoves":[{"move":"P16","winrate":0.3572,"scoreLead":-1.19,"pv":["P16","O18","R6","Q11","F3"]},{"move":"O17","winrate":0.3556,"scoreLead":-1.22,"pv":["O17","P17","P16","O18","R6"]},{"move":"P17","winrate":0.335,"scoreLead":-1.41,"pv":["P17","P18","O17","O18","N17"]}]},{"winrate":0.3557,"scoreLead":-1.21,"topMoves":[{"move":"O18","winrate":0.3536,"scoreLead":-1.24,"pv":["O18","Q5","R10","F3","R7"]},{"move":"O17","winrate":0.3586,"scoreLead":-1.17,"pv":["O17","S17","Q5","R8","N4"]},{"move":"P17","winrate":0.3605,"scoreLead":-1.16,"pv":["P17","N17","Q5","R8","N4"]}]},{"winrate":0.3547,"scoreLead":-1.23,"topMoves":[{"move":"R8","winrate":0.3582,"scoreLead":-1.23,"pv":["R8","N17","F3","Q12","P8"]},{"move":"Q5","winrate":0.3539,"scoreLead":-1.23,"pv":["Q5","R10","R8","Q12","S17"]},{"move":"R6","winrate":0.3549,"scoreLead":-1.21,"pv":["R6","Q11","S17","S18","P18"]}]},{"winrate":0.3533,"scoreLead":-1.28,"topMoves":[{"move":"N17","winrate":0.3496,"scoreLead":-1.32,"pv":["N17","F3","R12","R9","Q10"]},{"move":"F3","winrate":0.3574,"scoreLead":-1.3,"pv":["F3","N17","R8","R10","Q10"]},{"move":"D14","winrate":0.3581,"scoreLead":-1.21,"pv":["D14","F3","N17","C6","D6"]}]},{"winrate":0.3583,"scoreLead":-1.25,"topMoves":[{"move":"G4","winrate":0.3587,"scoreLead":-1.24,"pv":["G4","F4","G3","L3","K4"]},{"move":"N17","winrate":0.3596,"scoreLead":-1.25,"pv":["N17","R8","R10","Q4","R4"]},{"move":"C6","winrate":0.3589,"scoreLead":-1.24,"pv":["C6","N17","R11","D14","C14"]}]},{"winrate":0.3555,"scoreLead":-1.29,"topMoves":[{"move":"F4","winrate":0.3511,"scoreLead":-1.34,"pv":["F4","N17","R8","R10","Q4"]},{"move":"N17","winrate":0.3607,"scoreLead":-1.26,"pv":["N17","G3","F4","G5","M4"]},{"move":"H2","winrate":0.3609,"scoreLead":-1.17,"pv":["H2","C6","N17","R11","D14"]}]},{"winrate":0.3703,"scoreLead":-1.12,"topMoves":[{"move":"J4","winrate":0.3724,"scoreLead":-1.1,"pv":["J4","N17","H3","F4","G5"]},{"move":"Q9","winrate":0.3615,"scoreLead":-1.21,"pv":["Q9","N17","J4","R11","H3"]},{"move":"R10","winrate":0.3545,"scoreLead":-1.26,"pv":["R10","N17","J4","O3","C6"]}]},{"winrate":0.3496,"scoreLead":-1.34,"topMoves":[{"move":"R8","winrate":0.3466,"scoreLead":-1.38,"pv":["R8","R10","Q4","R4","R5"]},{"move":"R9","winrate":0.354,"scoreLead":-1.28,"pv":["R9","R11","Q11","Q12","Q10"]},{"move":"D14","winrate":0.3647,"scoreLead":-1.22,"pv":["D14","Q9","C14","J4","O3"]}]},{"winrate":0.3737,"scoreLead":-1.09,"topMoves":[{"move":"O16","winrate":0.3737,"scoreLead":-1.09,"pv":["O16","R8","R10","Q4","R4"]},{"move":"P17","winrate":0.2094,"scoreLead":-3.0,"pv":["P17"]},{"move":"E4","winrate":0.2423,"scoreLead":-2.56,"pv":["E4"]}]},{"winrate":0.3662,"scoreLead":-1.16,"topMoves":[{"move":"R8","winrate":0.3574,"scoreLead":-1.24,"pv":["R8","R10","Q4","R4","R5"]},{"move":"M17","winrate":0.3864,"scoreLead":-1.0,"pv":["M17","N18","S16","S15","N16"]},{"move":"R9","winrate":0.3676,"scoreLead":-1.13,"pv":["R9","R11","Q11","Q12","Q10"]}]},{"winrate":0.4157,"scoreLead":-0.69,"topMoves":[{"move":"M17","winrate":0.416,"scoreLead":-0.68,"pv":["M17","S16","S15","S17","R12"]},{"move":"N18","winrate":0.3403,"scoreLead":-1.41,"pv":["N18","S16","S15","S17"]},{"move":"L17","winrate":0.3032,"scoreLead":-1.79,"pv":["L17","M17"]}]},{"winrate":0.412,"scoreLead":-0.72,"topMoves":[{"move":"S16","winrate":0.4082,"scoreLead":-0.75,"pv":["S16","S15","S17","R12","R8"]},{"move":"S17","winrate":0.4208,"scoreLead":-0.67,"pv":["S17","L16","R8","R10","P8"]},{"move":"N15","winrate":0.4507,"scoreLead":-0.4,"pv":["N15","L16","S16","S15","S17"]}]},{"winrate":0.4649,"scoreLead":-0.25,"topMoves":[{"move":"L16","winrate":0.4657,"scoreLead":-0.24,"pv":["L16","S16","S15","S17","R14"]},{"move":"S17","winrate":0.3901,"scoreLead":-0.94,"pv":["S17","S18","S16","L16","L17"]},{"move":"K16","winrate":0.4054,"scoreLead":-0.87,"pv":["K16","S17","Q12","H17"]}]},{"winrate":0.395,"scoreLead":-0.96,"topMoves":[{"move":"S17","winrate":0.3909,"scoreLead":-1.01,"pv":["S17","Q12","H17","H16","G16"]},{"move":"S16","winrate":0.4159,"scoreLead":-0.76,"pv":["S16","S15","S17","R14","R11"]},{"move":"Q12","winrate":0.406,"scoreLead":-0.8,"pv":["Q12","S17","S18","S16","N18"]}]},{"winrate":0.4097,"scoreLead":-0.79,"topMoves":[{"move":"S15","winrate":0.4097,"scoreLead":-0.79,"pv":["S15","S17","R14","L15","G17"]},{"move":"P17","winrate":0.2459,"scoreLead":-2.63,"pv":["P17"]},{"move":"S17","winrate":0.2906,"scoreLead":-1.75,"pv":["S17"]}]},{"winrate":0.4106,"scoreLead":-0.78,"topMoves":[{"move":"S17","winrate":0.4107,"scoreLead":-0.78,"pv":["S17","R14","L15","G17","H16"]},{"move":"L16","winrate":0.5261,"scoreLead":0.56,"pv":["L16"]},{"move":"T17","winrate":0.6427,"scoreLead":1.68,"pv":["T17"]}]},{"winrate":0.4119,"scoreLead":-0.77,"topMoves":[{"move":"R14","winrate":0.4142,"scoreLead":-0.75,"pv":["R14","H17","N13","L15","H16"]},{"move":"Q12","winrate":0.4049,"scoreLead":-0.81,"pv":["Q12","H17","H16","G16","H15"]},{"move":"R12","winrate":0.4002,"scoreLead":-0.88,"pv":["R12","H17","H16","G16","H15"]}]},{"winrate":0.3726,"scoreLead":-1.12,"topMoves":[{"move":"R14","winrate":0.3694,"scoreLead":-1.15,"pv":["R14","Q13","H16","K14","L15"]},{"move":"L15","winrate":0.3719,"scoreLead":-1.16,"pv":["L15","R14","L16","L17","K15"]},{"move":"H16","winrate":0.3869,"scoreLead":-1.01,"pv":["H16","R14","L15","H17","L16"]}]},{"winrate":0.4479,"scoreLead":-0.46,"topMoves":[{"move":"O13","winrate":0.4577,"scoreLead":-0.37,"pv":["O13","P14","Q13","P13","P12"]},{"move":"R14","winrate":0.4225,"scoreLead":-0.66,"pv":["R14","O13","Q11","N12","G17"]},{"move":"Q12","winrate":0.3819,"scoreLead":-1.06,"pv":["Q12","O13","O12","N12","O11"]}]}],"quality":[{"deltaWinrate":-0.0024,"lostWinrate":0.0024,"bestMove":"Q16"},{"deltaWinrate":0.0217,"lostWinrate":0.0217,"bestMove":"D16"},{"deltaWinrate":-0.0081,"lostWinrate":0.0081,"bestMove":"Q4"},{"deltaWinrate":-0.0003,"lostWinrate":0.0,"bestMove":"D4"},{"deltaWinrate":0.0012,"lostWinrate":0.0,"bestMove":"C3"},{"deltaWinrate":-0.0015,"lostWinrate":0.0,"bestMove":"E16"},{"deltaWinrate":-0.0287,"lostWinrate":0.0287,"bestMove":"C3"},{"deltaWinrate":-0.0014,"lostWinrate":0.0,"bestMove":"R17"},{"deltaWinrate":0.0037,"lostWinrate":0.0,"bestMove":"R16"},{"deltaWinrate":0.0,"lostWinrate":0.0,"bestMove":"Q17"},{"deltaWinrate":-0.0009,"lostWinrate":0.0009,"bestMove":"P16"},{"deltaWinrate":-0.001,"lostWinrate":0.0,"bestMove":"O18"},{"deltaWinrate":-0.0014,"lostWinrate":0.0014,"bestMove":"R8"},{"deltaWinrate":0.005,"lostWinrate":0.005,"bestMove":"N17"},{"deltaWinrate":-0.0028,"lostWinrate":0.0028,"bestMove":"G4"},{"deltaWinrate":0.0148,"lostWinrate":0.0148,"bestMove":"F4"},{"deltaWinrate":-0.0207,"lostWinrate":0.0207,"bestMove":"J4"},{"deltaWinrate":0.0241,"lostWinrate":0.0241,"bestMove":"R8"},{"deltaWinrate":-0.0075,"lostWinrate":0.0075,"bestMove":"O16"},{"deltaWinrate":0.0495,"lostWinrate":0.0495,"bestMove":"R8"},{"deltaWinrate":-0.0037,"lostWinrate":0.0037,"bestMove":"M17"},{"deltaWinrate":0.0529,"lostWinrate":0.0529,"bestMove":"S16"},{"deltaWinrate":-0.0699,"lostWinrate":0.0699,"bestMove":"L16"},{"deltaWinrate":0.0147,"lostWinrate":0.0147,"bestMove":"S17"},{"deltaWinrate":0.0009,"lostWinrate":0.0,"bestMove":"S15"},{"deltaWinrate":0.0013,"lostWinrate":0.0013,"bestMove":"S17"},{"deltaWinrate":-0.0393,"lostWinrate":0.0393,"bestMove":"R14"},{"deltaWinrate":0.0753,"lostWinrate":0.0753,"bestMove":"R14"}],"sgf":"(;GM[1]FF[4]CA[UTF-8]AP[Sabaki:0.60.0]SZ[19]PB[棋手1]PW[棋手2]DT[2026-11-07]EV[日常记录]GN[弈客棋谱 #14461463];B[pd];W[dc];B[pq];W[dp]SBKV[96.77]SBKS[6.61];B[ce];W[ed];B[ch];W[qc];B[qd];W[pc];B[od];W[nb];B[pn]SBKV[95.74]SBKS[5.79];W[fq];B[gp];W[gq]SBKV[96.34]SBKS[6.3];B[mc];W[nc];B[nd];W[md];B[lc]SBKV[97.31]SBKS[6.84];W[me]SBKV[97.54]SBKS[7.54];B[jd]SBKV[96.2]SBKS[6.44];W[rd]SBKV[96.78]SBKS[6.66];B[re];W[rc]SBKV[96.8]SBKS[6.68];B[mg]SBKV[95.78]SBKS[5.95];W[nf]SBKV[96.74]SBKS[6.92](;B[pg]SBKV[95.51]SBKS[5.9];W[ng];B[nh]SBKV[94.81]SBKS[6.11];W[mh];B[ni]SBKV[90.97]SBKS[4.63];W[lg];B[mi];W[lh]SBKV[91.54]SBKS[4.92];B[li]SBKV[89.26]SBKS[4.41];W[hd]SBKV[91.93]SBKS[4.95];B[he]SBKV[78.6]SBKS[2.98];W[gd]SBKV[88.67]SBKS[4.69];B[jg]SBKV[90.11]SBKS[4.66];W[kd]SBKV[90.28]SBKS[5.07];B[kc];W[je]SBKV[95.97]SBKS[6.8];B[ke]SBKV[95.63]SBKS[6.76];W[kf];B[ld]SBKV[96.54]SBKS[7.05];W[jf]SBKV[96.58]SBKS[7.05];B[le];W[lf]SBKV[96.98]SBKS[6.93];B[ic]SBKV[96.93]SBKS[6.76];W[cj]SBKV[98.07]SBKS[8.56];B[hg]SBKV[94.64]SBKS[6.28];W[ji]SBKV[98.11]SBKS[10.37];B[jj]SBKV[94.91]SBKS[6.38];W[ij]SBKV[96.99]SBKS[9.05];B[ki]SBKV[96.53]SBKS[8.16];W[ii]SBKV[97.6]SBKS[9.62];B[ik];W[jk];B[kj];W[hk];B[il]SBKV[95.5]SBKS[7.37];W[hl]SBKV[97.91]SBKS[9.17];B[im];W[df]SBKV[98.88]SBKS[12.1];B[dj]SBKV[97]SBKS[9.04];W[dk]SBKV[98.77]SBKS[10.76];B[di]SBKV[97.08]SBKS[8.6];W[ck]SBKV[98.61]SBKS[11.6];B[ef]SBKV[97.03]SBKS[9.33];W[eg]SBKV[98.82]SBKS[12.78];B[dg]SBKV[96.84]SBKS[7.73];W[cg];B[dh];W[cf]SBKV[97.76]SBKS[10.33];B[de];W[ee];B[ff]SBKV[94.5]SBKS[6.76];W[be]SBKV[96.89]SBKS[8.56];B[if];W[ie]SBKV[98.05]SBKS[12.23];B[bf];W[bg];B[bh];W[af]SBKV[96.98]SBKS[9.63];B[ah];W[ag]SBKV[97.46]SBKS[10.53];B[id]SBKV[96.87]SBKS[9.98];W[fg]SBKV[98.72]SBKS[12.51];B[gh];W[gf]SBKV[98.72]SBKS[13.74];B[hf];W[qf]SBKV[99.09]SBKS[13.87];B[pf];W[fh]SBKV[99.62]SBKS[16.98];B[fi]SBKV[97.73]SBKS[10.21];W[gi]SBKV[97.95]SBKS[9.21];B[gg]SBKV[87.14]SBKS[5.65];W[fe];B[gj]SBKV[87.02]SBKS[5.2];W[hi]SBKV[87.23]SBKS[5.52];B[kh];W[fj]SBKV[90.79]SBKS[5.96];B[hm];W[ql]SBKV[98.5]SBKS[10.57];B[rm]SBKV[94.53]SBKS[7.33];W[jp];B[lp]SBKV[93.6]SBKS[7];W[pr];B[qq]SBKV[97.25]SBKS[8.67];W[mq]SBKV[99.07]SBKS[12.55];B[lq];W[lr];B[mp];W[nr];B[nq];W[mr]SBKV[99.48]SBKS[15.17];B[or];W[kq]SBKV[99.29]SBKS[14.17](;B[fk]SBKV[98.74]SBKS[10.87];W[ej];B[ek]SBKV[93.44]SBKS[5.48];W[ei]SBKV[94.57]SBKS[6.24];B[cp]SBKV[94.15]SBKS[5.17];W[cq]SBKV[94.7]SBKS[6.04];B[do]SBKV[94.18]SBKS[5.19];W[co];B[bp]SBKV[93.96]SBKS[4.99];W[bo]SBKV[97.35]SBKS[6.3];B[bq]SBKV[57.53]SBKS[1.13];W[dq]SBKV[63.45]SBKS[2.03];B[dn]SBKV[63.53]SBKS[1.31];W[cm]SBKV[78.22]SBKS[1.91];B[dm]SBKV[68.12]SBKS[1.83];W[cl]SBKV[88.78]SBKS[3.67];B[ko]SBKV[86.48]SBKS[1.87];W[jo]SBKV[89.43]SBKS[3.01];B[jn]SBKV[81.47]SBKS[2.6];W[kn]SBKV[91.79]SBKS[3.35];B[ln]SBKV[82.91]SBKS[1.47];W[gm]SBKV[85.41]SBKS[3.75];B[gn]SBKV[84.39]SBKS[3.45];W[fn]SBKV[92.93]SBKS[10.33];B[fm]SBKV[63.04]SBKS[1];W[gl]SBKV[67.34]SBKS[1.45];B[go]SBKV[49.34]SBKS[0.41])(;B[ko]SBKV[97.95]SBKS[8.55];W[jo]SBKV[98.93]SBKS[10.92];B[jn];W[rf]SBKV[97.23]SBKS[10.27];B[qe];W[se];B[rg];W[sg];B[rh]SBKV[98.78]SBKS[10.63];W[kn]SBKV[99.42]SBKS[11.62];B[ln];W[gm]SBKV[99.29]SBKS[11.68];B[fk]SBKV[98.3]SBKS[9.17];W[ej];B[ek];W[ei]SBKV[96.05]SBKS[7.03];B[cp];W[cq]SBKV[95.82]SBKS[9.11];B[do];W[co];B[bp];W[bo]SBKV[99.46]SBKS[10.49];B[bq]SBKV[96.89]SBKS[6.47];W[dq]SBKV[98.91]SBKS[8.87];B[dn];W[cm]SBKV[97.7]SBKS[8.86];B[dm];W[cl];B[gn]SBKV[97.42]SBKS[7.32];W[fn]SBKV[99.02]SBKS[9.98];B[fm];W[gl]SBKV[99.54]SBKS[6.45];B[go]SBKV[98.83]SBKS[6.22];W[em]SBKV[99.21]SBKS[9.96]))(;B[ng]SBKV[92.22]SBKS[5.47](;W[pf]SBKV[98.78]SBKS[9.99];B[of]SBKV[97.77]SBKS[8.87];W[oe]SBKV[99.1]SBKS[11.53];B[og]SBKV[98.58]SBKS[11.29];W[ne]SBKV[98.77]SBKS[11.97](;B[pe]SBKV[52.35]SBKS[0.27];W[qf]SBKV[54.13]SBKS[0.42];B[qe]SBKV[6.01]SBKS[-4.97])(;B[qe]SBKV[98.64]SBKS[11.17];W[pe]SBKV[99.55]SBKS[16.25];B[qg]SBKV[99.38]SBKS[15.67];W[pg]SBKV[99.49]SBKS[15.56];B[ph]SBKV[99.25]SBKS[15.46]))(;W[of]SBKV[97.76]SBKS[8.84];B[pg]SBKV[97.39]SBKS[8.51];W[og]SBKV[97.33]SBKS[8.38];B[oh]SBKV[97.19]SBKS[8.36];W[ph]SBKV[98.11]SBKS[9.25](;B[qg]SBKV[97.75]SBKS[8.82])(;B[qf]SBKV[96.64]SBKS[8.86]))))","file":"棋手1-棋手2-28手.sgf"};
+const BS = D.meta.boardSize;
+const GTP = "ABCDEFGHJKLMNOPQRST";
+const NM = D.moves.length;
+const H19 = [[3,3],[9,3],[15,3],[3,9],[9,9],[15,9],[3,15],[9,15],[15,15]];
+const WARN = .10, BAD = .20;
+let cur = NM;
+let trial = null;   // 点选的试下 (sticky)
+let hover = null;   // 悬停预览 (transient); 弈客: 已点选时 hover 不生效
+let sugCache = { n: -1, list: [] };
+const shown = () => hover || trial;
+
+/* 弈客 colorList (chunk18 原样) + 本页自定的损失分档 (他们的 level 由服务端给) */
+const LEVEL_COLORS = ["", "rgba(36, 142, 53,1)", "rgba(36, 142, 53,1)", "rgba(36, 142, 53,1)",
+  "#82AA28", "#DCB41E", "#EB8C00", "#DC5A14", "rgb(220,0,0)", "rgb(145,0,0)"];
+const LEVEL_T = [.01, .03, .05, .08, .12, .17, .23, .32];
+function levelOf(loss) {
+  for (let i = 0; i < LEVEL_T.length; i++) if (loss < LEVEL_T[i]) return i + 1;
+  return 9;
+}
+function levelColor(loss) { return LEVEL_COLORS[levelOf(loss)]; }
+/* 绿色档: colorList 的 1-3 级共用同一个绿 —— 推荐点必须落在这档内, 不能"虽更优但仍差" */
+const GREEN_LV = 3;
+function isGreen(loss) { return levelOf(loss) <= GREEN_LV; }
+
+function sev(l) { return l >= BAD ? "bad" : l >= WARN ? "warn" : "good"; }
+function sevOf(n) { return n > 0 && D.quality[n-1] ? sev(D.quality[n-1].lostWinrate) : null; }
+const wr = i => D.analysis[i] ? D.analysis[i].winrate : .5;
+function fmtScore(sc) {
+  if (sc === null || sc === undefined) return "—";
+  return (sc >= 0 ? "黑+" : "白+") + Math.abs(sc).toFixed(1);
+}
+
+/* ── 坐标 ── */
+function gtp2cr(g) {
+  if (!g || g === "pass") return null;
+  const c = GTP.indexOf(g[0]), n = parseInt(g.slice(1), 10);
+  if (c < 0 || !n) return null;
+  return { c: c, r: BS - n };
+}
+
+/* ── 局面重演 (含提子) ── */
+const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+function group(g, c0, r0, who, visited) {
+  const stack = [[c0, r0]], cells = [];
+  let lib = false;
+  while (stack.length) {
+    const [c, r] = stack.pop(), i = r * BS + c;
+    if (visited[i]) continue;
+    visited[i] = 1; cells.push(i);
+    for (const [dc, dr] of DIRS) {
+      const c2 = c + dc, r2 = r + dr;
+      if (c2 < 0 || r2 < 0 || c2 >= BS || r2 >= BS) continue;
+      const j = r2 * BS + c2;
+      if (g[j] === 0) lib = true;
+      else if (g[j] === who && !visited[j]) stack.push([c2, r2]);
+    }
+  }
+  return { cells: cells, lib: lib };
+}
+function boardAt(n, extra) {
+  const g = new Uint8Array(BS * BS), caps = { B: 0, W: 0 };
+  const labels = new Map();               // 试下手的编号
+  for (const s of D.meta.initialStones) {
+    const p = gtp2cr(s[1]);
+    if (p) g[p.r * BS + p.c] = s[0] === "B" ? 1 : 2;
+  }
+  const seq = extra && extra.length ? D.moves.slice(0, n).concat(extra) : D.moves.slice(0, n);
+  let lastIdx = -1;
+  for (let i = 0; i < seq.length; i++) {
+    const mv = seq[i], p = gtp2cr(mv.gtp);
+    if (!p) continue;
+    if (i >= n) labels.set(p.r * BS + p.c, i - n + 1);
+    const me = mv.color === "B" ? 1 : 2, opp = me === 1 ? 2 : 1;
+    g[p.r * BS + p.c] = me; lastIdx = p.r * BS + p.c;
+    for (const [dc, dr] of DIRS) {
+      const c2 = p.c + dc, r2 = p.r + dr;
+      if (c2 < 0 || r2 < 0 || c2 >= BS || r2 >= BS) continue;
+      if (g[r2 * BS + c2] !== opp) continue;
+      const grp = group(g, c2, r2, opp, new Uint8Array(BS * BS));
+      if (!grp.lib) { grp.cells.forEach(j => g[j] = 0); caps[mv.color] += grp.cells.length; }
+    }
+    const own = group(g, p.c, p.r, me, new Uint8Array(BS * BS));
+    if (!own.lib) own.cells.forEach(j => { g[j] = 0; labels.delete(j); });
+  }
+  return { g: g, caps: caps, lastIdx: lastIdx, labels: labels };
+}
+
+/* 实战手相对最佳的损失 —— 候选的取舍基准.
+   实战手若在候选里, 用同一次搜索的值 (最可比); 否则退回跨搜索的 lostWinrate. */
+function realLoss() {
+  if (cur >= NM) return null;                          // 末局面没有实战手可比
+  const an = D.analysis[cur], tops = (an && an.topMoves) ? an.topMoves : [];
+  if (!tops.length) return null;
+  const isB = nextColor() === "B";
+  const own = w => isB ? w : 1 - w;
+  const hit = tops.find(t => t.move === D.moves[cur].gtp);
+  return hit ? Math.max(0, own(tops[0].winrate) - own(hit.winrate))
+             : D.quality[cur].lostWinrate;
+}
+
+/* ── 当前局面的推荐标记 (绘制与命中测试共用同一份) ── */
+function suggestions() {
+  if (sugCache.n === cur) return sugCache;
+  const an = D.analysis[cur], tops = (an && an.topMoves) ? an.topMoves.slice(0, 4) : [];
+  const base = boardAt(cur), isB = nextColor() === "B";
+  const best = tops.length ? (isB ? tops[0].winrate : 1 - tops[0].winrate) : 0;
+  const rl = realLoss();
+  const all = [];
+  tops.forEach((t, i) => {
+    const own = isB ? t.winrate : 1 - t.winrate;
+    const loss = Math.max(0, best - own);
+    const p = gtp2cr(t.move);
+    // 入选条件: 严格优于实战手 (末局面无实战手则免此条) 且本身是绿色档 (不能太差)
+    const better = (rl === null || loss < rl) && isGreen(loss);
+    all.push({ i: i, move: t.move, own: own, loss: loss, isB: isB, better: better,
+               c: p ? p.c : -1, r: p ? p.r : -1,
+               onBoard: !!p && !base.g[p.r * BS + p.c] && better });
+  });
+  // 实战手也画上 (弈客的 "实战" 概念): 它不在 better 集里, 单独一条
+  let real = null;
+  if (rl !== null) {
+    const mv = D.moves[cur], p = gtp2cr(mv.gtp);
+    if (p && !base.g[p.r * BS + p.c]) {
+      const hit = tops.find(t => t.move === mv.gtp);
+      const post = D.analysis[cur + 1];
+      // 该手的胜率: 在候选里用同一次搜索的值, 否则用落子后的根胜率
+      const own = hit ? (isB ? hit.winrate : 1 - hit.winrate)
+                      : (post ? (isB ? post.winrate : 1 - post.winrate) : null);
+      real = { i: -1, real: true, move: mv.gtp, c: p.c, r: p.r,
+               own: own, loss: rl, isB: isB, onBoard: true };
+    }
+  }
+  sugCache = { n: cur, all: all, board: all.filter(x => x.onBoard),
+               real: real, realLoss: rl };
+  return sugCache;
+}
+
+/* ── 棋盘 ── */
+const cv = document.getElementById("board");
+let geom = { st: 0, mg: 0, px: 0 };
+function sizeBoard() {
+  const dpr = window.devicePixelRatio || 1, css = cv.clientWidth || 440;
+  cv.width = Math.round(css * dpr); cv.height = cv.width;
+  const mg = Math.round(cv.width * 0.042);
+  geom = { st: (cv.width - 2 * mg) / (BS - 1), mg: mg, px: cv.width };
+}
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function drawStone(ctx, x, y, r, black) {
+  const gr = ctx.createRadialGradient(x - r * .35, y - r * .4, r * .1, x, y, r * 1.05);
+  if (black) { gr.addColorStop(0, cssVar("--stone-b-hi")); gr.addColorStop(.5, cssVar("--stone-b")); gr.addColorStop(1, cssVar("--stone-b")); }
+  else { gr.addColorStop(0, "#FFFDF6"); gr.addColorStop(.62, cssVar("--stone-w")); gr.addColorStop(1, cssVar("--stone-w-lo")); }
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = gr; ctx.fill();
+  if (!black) { ctx.strokeStyle = "rgba(90,80,50,.28)"; ctx.lineWidth = Math.max(1, r * .05); ctx.stroke(); }
+}
+function renderBoard() {
+  const ctx = cv.getContext("2d"), { st, mg, px } = geom, r = st * .468;
+  const S = boardAt(cur, shown() ? shown().moves : null);
+  ctx.fillStyle = cssVar("--board"); ctx.fillRect(0, 0, px, px);
+  ctx.strokeStyle = cssVar("--board-line"); ctx.lineWidth = Math.max(1, px / 760);
+  ctx.beginPath();
+  for (let i = 0; i < BS; i++) {
+    const p = mg + i * st;
+    ctx.moveTo(Math.round(p) + .5, mg); ctx.lineTo(Math.round(p) + .5, mg + (BS - 1) * st);
+    ctx.moveTo(mg, Math.round(p) + .5); ctx.lineTo(mg + (BS - 1) * st, Math.round(p) + .5);
+  }
+  ctx.stroke();
+  if (BS === 19) {
+    ctx.fillStyle = cssVar("--board-line");
+    H19.forEach(([c, rr]) => { ctx.beginPath(); ctx.arc(mg + c * st, mg + rr * st, Math.max(1.6, st * .1), 0, Math.PI * 2); ctx.fill(); });
+  }
+  ctx.fillStyle = cssVar("--board-label"); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = Math.max(7, Math.round(st * .33)) + "px " + cssVar("--mono");
+  for (let i = 0; i < BS; i++) {
+    ctx.fillText(GTP[i], mg + i * st, mg - st * .64);
+    ctx.fillText(String(BS - i), mg - st * .68, mg + i * st);
+  }
+  for (let i = 0; i < S.g.length; i++) {
+    if (!S.g[i]) continue;
+    const c = i % BS, rr = (i - c) / BS;
+    drawStone(ctx, mg + c * st, mg + rr * st, r, S.g[i] === 1);
+  }
+  // 试下手的编号 (弈客: markerStyle "LB", markerNum 1 起)
+  if (S.labels.size) {
+    ctx.textBaseline = "middle"; ctx.textAlign = "center";
+    S.labels.forEach((num, idx) => {
+      const c = idx % BS, rr = (idx - c) / BS;
+      const txt = String(num);
+      ctx.font = Math.round(txt.length > 1 ? r * 1.2 : r * 1.5) + "px " + cssVar("--mono");
+      // 弈客 markupBlackColor / markupWhiteColor
+      ctx.fillStyle = S.g[idx] === 1 ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.7)";
+      ctx.fillText(txt, mg + c * st, mg + rr * st);
+    });
+  }
+
+  // 末手: 红色向下三角 (弈客 lastMoveColor "red", 几何照搬)
+  if (S.lastIdx >= 0 && !S.labels.size) {
+    const c = S.lastIdx % BS, rr = (S.lastIdx - c) / BS;
+    const x = mg + c * st, y = mg + rr * st;
+    ctx.fillStyle = "#FF0000";
+    ctx.beginPath();
+    ctx.moveTo(x - .5, y + .5 + Math.round(r / 1.2));
+    ctx.lineTo(Math.round(x - r / 1.5) - .5, Math.round(y + r / 2) + .5);
+    ctx.lineTo(Math.round(x + r / 1.5) + .5, Math.round(y + r / 2) + .5);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // 推荐着点: 弈客 YKLBBW —— 色圆 + 胜率数字, 首选带 "1" 角标
+  if (!shown()) {
+    const lw = Math.max(1, r / 8);
+    // 弈客 YKLBBW: 色圆 + 胜率数字.
+    // 实战手不用文字角标 —— 标记圆本就快填满格子, 外挂字会出格;
+    // 改成圆盘内缩 + 常规半径上描一道外圈, 总占位与其他标记一致.
+    const R0 = Math.max(0, r - lw) + 2;             // 常规标记半径 (≈填满格子)
+    // 实战手的外圈: 外沿必须留在格内, 所以按格半距反算, 再把圆盘缩到圈内
+    const ringW = Math.max(1.5, lw * 0.8);
+    const Rring = Math.min(R0, st / 2 - ringW / 2 - 0.4);
+    const Rreal = Math.max(3, Rring - ringW / 2 - Math.max(1, lw * 0.3));
+    const kReal = Rreal / R0;                       // 圆盘缩放比
+    const mono = cssVar("--mono");
+    // 弈客的字号档 (1字 1.5r / 2字 1.2r / 更长 0.75r), scale 用于内缩的圆盘
+    const tier = (t, scale) => Math.round(
+      (t.length > 2 ? 3 * r / 4 : t.length === 2 ? 1.2 * r : 1.5 * r) * scale);
+    // 内缩圆盘里放胜率: 守同一字号档, 实测装不下才退成整数
+    const label = (own, R, scale) => {
+      if (own === null) { ctx.font = Math.round(R) + "px " + mono; return "?"; }
+      const pct = own * 100;
+      for (const t of [pct.toFixed(1), String(Math.round(pct))]) {
+        ctx.font = tier(t, scale) + "px " + mono;
+        if (!ctx.measureText || ctx.measureText(t).width <= 2 * R - 2) return t;
+      }
+      const t = String(Math.round(pct));
+      ctx.font = Math.round(tier(t, scale) * .8) + "px " + mono;
+      return t;
+    };
+    const mark = (sg, kind) => {
+      const x = mg + sg.c * st, y = mg + sg.r * st;
+      const isReal = kind === "real";
+      const R = isReal ? Rreal : R0;
+      ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2, true);
+      ctx.fillStyle = levelColor(sg.loss); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = sg.isB ? "black" : "white"; ctx.stroke();
+      ctx.fillStyle = "#eeeeee"; ctx.textBaseline = "middle"; ctx.textAlign = "center";
+      let txt;
+      if (isReal) {
+        txt = label(sg.own, R, kReal);                // 同档字号 × 缩放比, 必要时退整数
+      } else {
+        txt = sg.own === null ? "?" : (sg.own * 100).toFixed(1);
+        ctx.font = tier(txt, 1) + "px " + mono;
+      }
+      ctx.fillText(txt, x, y, 2 * R);
+      if (isReal) {                                   // 实战手: 盘外一道圈
+        ctx.beginPath(); ctx.arc(x, y, Rring, 0, Math.PI * 2, true);
+        ctx.lineWidth = ringW;
+        ctx.strokeStyle = sg.isB ? "black" : "white";
+        ctx.stroke();
+      } else if (kind === "top") {                    // 弈客的 main 角标
+        const bx = x + r / 1.4, by = y - r / 1.4, br = Math.max(0, r / 2.3);
+        ctx.fillStyle = sg.isB ? "black" : "white";
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2, true); ctx.fill();
+        ctx.fillStyle = sg.isB ? "white" : "black";
+        ctx.font = Math.round(r) + "px " + cssVar("--mono");
+        ctx.fillText("1", bx, by, 2 * r);
+      }
+    };
+    const sug = suggestions();
+    if (sug.real) mark(sug.real, "real");
+    sug.board.forEach((sg, k) => mark(sg, k === 0 ? "top" : null));
+  }
+  return S;
+}
+
+/* ── 胜率条 + 选手行 ── */
+function renderBar() {
+  const w = wr(cur), b = w * 100, wh = 100 - b;
+  const L = document.getElementById("vsl"), R = document.getElementById("vsr");
+  L.style.width = b.toFixed(1) + "%"; R.style.width = wh.toFixed(1) + "%";
+  L.textContent = b >= 16 ? b.toFixed(1) + "%" : "";
+  R.textContent = wh >= 16 ? wh.toFixed(1) + "%" : "";
+  document.getElementById("bwr").textContent = b.toFixed(1) + "%";
+  document.getElementById("wwr").textContent = wh.toFixed(1) + "%";
+}
+
+/* ── 推荐着点 (弈客行式: 编号棋子 / 坐标 / 实战 / 胜率 / 领先落后) ── */
+function renderRecommend() {
+  const an = D.analysis[cur], host = document.getElementById("rlist");
+  const played = cur < NM ? D.moves[cur].gtp : null;
+  const isB = nextColor() === "B";
+  document.getElementById("rctx").textContent =
+    (cur === 0 ? "开局" : "第 " + cur + " 手后") + " · 轮" + (isB ? "黑" : "白") + "走";
+  const sug = suggestions(), all = sug.all;
+  const nBetter = sug.board.length;
+  document.getElementById("rgap").textContent =
+    sug.realLoss === null
+      ? (nBetter ? "盘上标出 " + nBetter + " 个候选" : "无绿色档候选")
+      : nBetter ? "盘上: 实 + " + nBetter + " 个更优点"
+                : (isGreen(sug.realLoss) ? "盘上: 实战即最佳" : "盘上: 仅实战手 (无绿色档更优点)");
+  if (!all.length) { host.innerHTML = '<div class="none">该局面没有候选数据</div>'; return; }
+  const tops = an.topMoves;
+  host.innerHTML = all.map((sg, i) => {
+    const t = tops[i];
+    const sl = isB ? t.scoreLead : -t.scoreLead;    // 该方视角: 正=领先
+    const ahead = sl >= 0;
+    const on = trial && trial.sel === sg.move ? " on" : "";
+    const dim = sg.better ? "" : " weak";           // 不优于实战 -> 弱化, 与盘面一致
+    return '<div class="rrow' + on + dim + '" data-mv="' + sg.move + '" data-i="' + i + '" role="button" tabindex="0">'
+      + '<span class="chip ' + (isB ? "b" : "w") + '">' + String(i + 1).padStart(2, "0") + '</span>'
+      + '<span class="co">' + sg.move + '</span>'
+      + (played && sg.move === played
+          ? '<span class="shizhan" style="background:' + LEVEL_COLORS[levelOf(sg.loss)] + '">实战</span>' : '')
+      + '<span class="wr">' + (sg.own * 100).toFixed(1) + '%</span>'
+      + '<span class="sl ' + (ahead ? "ahead" : "behind") + '">'
+        + (ahead ? "领先" : "落后") + " " + Math.abs(sl).toFixed(1) + ' 目</span></div>';
+  }).join("");
+  host.querySelectorAll(".rrow").forEach(el => {
+    const mv = el.dataset.mv, i = Number(el.dataset.i);
+    el.addEventListener("click", () => toggleTrial(mv, i));
+    el.addEventListener("mouseenter", () => setHover(mv, i));
+    el.addEventListener("mouseleave", () => setHover(null));
+    el.addEventListener("focus", () => setHover(mv, i));
+    el.addEventListener("blur", () => setHover(null));
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTrial(mv, i); }
+    });
+  });
+  markRows();
+}
+
+/* ── 盘上命中测试: 鼠标移到推荐标记上就预览后续手顺 ── */
+function hitSuggestion(e) {
+  const b = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  const scale = cv.width / b.width;                    // CSS 像素 -> canvas 像素
+  const x = (t.clientX - b.left) * scale, y = (t.clientY - b.top) * scale;
+  const { st, mg } = geom, rad = st * .468 + 2;
+  const sug = suggestions();
+  for (const sg of sug.board.concat(sug.real ? [sug.real] : [])) {
+    const dx = x - (mg + sg.c * st), dy = y - (mg + sg.r * st);
+    if (dx * dx + dy * dy <= rad * rad) return sg;
+  }
+  return null;
+}
+cv.addEventListener("mousemove", e => {
+  const sg = hitSuggestion(e);
+  cv.style.cursor = sg ? "pointer" : "default";
+  if (!trial) setHover(sg ? sg.move : null, sg ? sg.i : 0);
+});
+cv.addEventListener("mouseleave", () => { cv.style.cursor = "default"; setHover(null); });
+cv.addEventListener("click", e => {                    // 触屏/点按也能钉住
+  const sg = hitSuggestion(e);
+  if (sg) { hover = null; toggleTrial(sg.move, sg.i); }
+});
+
+/* ── 试下 / 悬停预览 (弈客 recommendStoneTop / hoverActive) ── */
+function buildTrial(mv, i) {
+  if (i === -1) {                                      // 实战手 -> 摆真实的后续进行
+    const n = Math.min(6, NM - cur);
+    if (n <= 0) return null;
+    return { sel: mv, real: true,
+             moves: D.moves.slice(cur, cur + n).map(m => ({ color: m.color, gtp: m.gtp })) };
+  }
+  const an = D.analysis[cur];
+  const t = an && an.topMoves ? an.topMoves[i] : null;
+  if (!t) return null;
+  const pv = (t.pv && t.pv.length) ? t.pv : [t.move];
+  let col = nextColor();
+  return { sel: mv, moves: pv.map(g => { const m = { color: col, gtp: g }; col = col === "B" ? "W" : "B"; return m; }) };
+}
+function syncBar() {
+  const a = shown(), bar = document.getElementById("tbar");
+  if (!a) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.classList.toggle("preview", !trial);
+  document.getElementById("tinfo").innerHTML =
+    (a.real ? (trial ? "实战进行 <b>" : "实战进行 <b>") : (trial ? "试下 <b>" : "预览 <b>"))
+    + a.sel + "</b> 后续 " + a.moves.length + " 手"
+    + (trial ? "" : " · 移开指针还原");
+  document.getElementById("texit").hidden = !trial;
+}
+/* 只切行的高亮, 不重建 DOM —— 否则鼠标下的节点被换掉, hover 会抖 */
+function markRows() {
+  const a = shown();
+  document.querySelectorAll(".rrow").forEach(el => {
+    el.classList.toggle("on", !!trial && trial.sel === el.dataset.mv);
+    el.classList.toggle("hv", !trial && !!a && a.sel === el.dataset.mv);
+  });
+}
+function toggleTrial(mv, i) {
+  if (trial && trial.sel === mv) { trial = null; }
+  else { trial = buildTrial(mv, i); hover = null; }
+  renderBoard(); syncBar(); markRows();
+}
+function setHover(mv, i) {
+  if (trial) return;                                   // 弈客: 已点选时 hover 不生效
+  if ((hover && hover.sel === mv) || (!hover && !mv)) return;
+  hover = mv ? buildTrial(mv, i) : null;
+  renderBoard(); syncBar(); markRows();
+}
+function exitTrial() {
+  trial = null; hover = null;
+  renderBoard(); syncBar(); markRows();
+}
+function nextColor() {
+  const hcp = D.meta.initialStones.length > 0 && D.meta.handicap > 0;
+  return hcp ? (cur % 2 === 1 ? "B" : "W") : (cur % 2 === 0 ? "B" : "W");
+}
+
+/* ── 胜率曲线 ── */
+const svg = document.getElementById("chart"), tip = document.getElementById("tip");
+const CW = 480, CH = 200, PL = 30, PR = 8, PT = 8, PB = 18;
+const plotW = CW - PL - PR, plotH = CH - PT - PB;
+const xAt = i => PL + (NM ? i / NM : 0) * plotW;
+const yAt = w => PT + (1 - w) * plotH;
+const BL = D.quality.map((q, i) => ({ n: i + 1, lost: q.lostWinrate, color: D.moves[i].color,
+    best: q.bestMove, gtp: D.moves[i].gtp, sev: sev(q.lostWinrate) })).filter(b => b.lost >= WARN);
+function buildChart() {
+  svg.setAttribute("viewBox", "0 0 " + CW + " " + CH);
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  svg.textContent = "";
+  let up = "M" + xAt(0) + "," + yAt(.5), dn = "M" + xAt(0) + "," + yAt(.5);
+  for (let i = 0; i <= NM; i++) {
+    const w = wr(i);
+    up += "L" + xAt(i) + "," + yAt(Math.max(.5, w));
+    dn += "L" + xAt(i) + "," + yAt(Math.min(.5, w));
+  }
+  up += "L" + xAt(NM) + "," + yAt(.5) + "Z"; dn += "L" + xAt(NM) + "," + yAt(.5) + "Z";
+  svg.appendChild(el("path", { d: dn, fill: "var(--chart-w)" }));
+  svg.appendChild(el("path", { d: up, fill: "var(--chart-b)", "fill-opacity": ".88" }));
+  [0, .25, .75, 1].forEach(v => {
+    svg.appendChild(el("line", { x1: PL, x2: PL + plotW, y1: yAt(v), y2: yAt(v), stroke: "var(--line)", "stroke-width": ".6" }));
+    const t = el("text", { x: PL - 5, y: yAt(v) + 3, "text-anchor": "end" });
+    t.textContent = Math.round(v * 100) + "%"; svg.appendChild(t);
+  });
+  svg.appendChild(el("line", { x1: PL, x2: PL + plotW, y1: yAt(.5), y2: yAt(.5), stroke: "var(--ink-3)", "stroke-width": ".9", "stroke-dasharray": "3 3" }));
+  const step = NM > 180 ? 50 : NM > 80 ? 25 : 10;
+  for (let n = 0; n <= NM; n += step) {
+    const t = el("text", { x: xAt(n), y: CH - 5, "text-anchor": n === 0 ? "start" : "middle" });
+    t.textContent = n; svg.appendChild(t);
+  }
+  let line = "";
+  for (let i = 0; i <= NM; i++) line += (i ? "L" : "M") + xAt(i) + "," + yAt(wr(i));
+  svg.appendChild(el("path", { d: line, fill: "none", stroke: "var(--ink)", "stroke-width": "1.5", "stroke-opacity": ".7", "stroke-linejoin": "round" }));
+  BL.forEach(b => svg.appendChild(el("line", {
+    x1: xAt(b.n), x2: xAt(b.n), y1: yAt(wr(b.n)), y2: yAt(wr(b.n - 1)),
+    stroke: levelColor(b.lost),
+    "stroke-width": b.lost >= BAD ? "2.4" : "1.7", "stroke-linecap": "round" })));
+  const mk = el("line", { id: "cursor", y1: PT, y2: PT + plotH, stroke: "var(--accent)", "stroke-width": "1.2" });
+  mk.setAttribute("x1", xAt(cur)); mk.setAttribute("x2", xAt(cur)); svg.appendChild(mk);
+  const hd = el("circle", { id: "cdot", r: "3.4", fill: "var(--accent)", stroke: "var(--card)", "stroke-width": "1.5" });
+  hd.setAttribute("cx", xAt(cur)); hd.setAttribute("cy", yAt(wr(cur))); svg.appendChild(hd);
+}
+function moveFromEvent(e) {
+  const b = svg.getBoundingClientRect();
+  const x = ((e.touches ? e.touches[0].clientX : e.clientX) - b.left) / b.width * CW;
+  return Math.max(0, Math.min(NM, Math.round((x - PL) / plotW * NM)));
+}
+svg.addEventListener("mousemove", e => {
+  const n = moveFromEvent(e), b = svg.getBoundingClientRect(), w = wr(n);
+  tip.style.opacity = "1";
+  tip.style.left = (xAt(n) / CW * b.width) + "px";
+  tip.style.top = (yAt(w) / CH * b.height - 8) + "px";
+  tip.textContent = (n === 0 ? "开局" : "第 " + n + " 手") + " · 黑 " + (w * 100).toFixed(1) + "% · "
+    + fmtScore(D.analysis[n] ? D.analysis[n].scoreLead : 0);
+});
+svg.addEventListener("mouseleave", () => tip.style.opacity = "0");
+svg.addEventListener("click", e => goto(moveFromEvent(e)));
+
+/* ── 失着榜 ── */
+function buildLists() {
+  ["B", "W"].forEach(col => {
+    const host = document.getElementById("list" + col);
+    const rows = BL.filter(b => b.color === col).sort((a, b) => b.lost - a.lost).slice(0, 8);
+    if (!rows.length) { host.innerHTML = '<div class="none">无损失超过 10% 的手</div>'; return; }
+    const bg = col === "B" ? "radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%)"
+                           : "radial-gradient(circle at 34% 30%, #fff, var(--stone-w-lo))";
+    const bd = col === "B" ? "" : ";border:1px solid var(--line)";
+    host.innerHTML = rows.map(b =>
+      '<div class="mrow" data-n="' + b.n + '"><span class="st" style="background:' + bg + bd + '"></span>'
+      + '<span class="hn">' + b.n + '</span><span class="co">' + b.gtp + '</span>'
+      + '<span class="ls" style="color:' + levelColor(b.lost) + '">-' + (b.lost * 100).toFixed(0) + '%</span>'
+      + '<span class="bm">推荐 ' + (b.best || "—") + '</span></div>').join("");
+    host.querySelectorAll(".mrow").forEach(el => el.addEventListener("click", () => goto(Number(el.dataset.n))));
+  });
+}
+function hiLists() {
+  document.querySelectorAll(".mrow").forEach(el => el.classList.toggle("on", Number(el.dataset.n) === cur));
+}
+
+/* ── 分栏切换 ── */
+document.querySelectorAll('[role="tab"]').forEach((btn, i) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[role="tab"]').forEach((b, j) => {
+      b.setAttribute("aria-selected", String(i === j));
+      document.getElementById("p" + j).hidden = i !== j;
+    });
+  });
+});
+
+/* ── 导航 ── */
+function goto(n) {
+  cur = Math.max(0, Math.min(NM, n));
+  trial = null; hover = null;
+  document.getElementById("tbar").hidden = true;
+  const S = renderBoard();
+  renderBar(); renderRecommend(); syncBar();
+  const c = document.getElementById("cursor"), d = document.getElementById("cdot");
+  if (c) { c.setAttribute("x1", xAt(cur)); c.setAttribute("x2", xAt(cur)); }
+  if (d) { d.setAttribute("cx", xAt(cur)); d.setAttribute("cy", yAt(wr(cur))); }
+  hiLists();
+}
+document.getElementById("texit").onclick = exitTrial;
+const STEP = 5;
+document.getElementById("first").onclick = () => goto(0);
+document.getElementById("back5").onclick = () => goto(cur - STEP);
+document.getElementById("prev").onclick = () => goto(cur - 1);
+document.getElementById("next").onclick = () => goto(cur + 1);
+document.getElementById("fwd5").onclick = () => goto(cur + STEP);
+document.getElementById("last").onclick = () => goto(NM);
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowLeft") { goto(cur - (e.shiftKey ? STEP : 1)); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { goto(cur + (e.shiftKey ? STEP : 1)); e.preventDefault(); }
+  else if (e.key === "Home") { goto(0); e.preventDefault(); }
+  else if (e.key === "End") { goto(NM); e.preventDefault(); }
+});
+
+/* ── 导出棋谱 ──
+   下载走 Blob + <a download>。注意: 在 claude.ai 的 artifact 预览里
+   页面自己发起的下载会被沙箱拦掉, 所以同时留了「复制棋谱」兜底;
+   GitHub Pages 这种普通网页下两个都正常。 */
+const msg = (t) => {
+  const el = document.getElementById("actmsg");
+  el.textContent = t;
+  clearTimeout(msg._t);
+  msg._t = setTimeout(() => { el.textContent = ""; }, 4000);
+};
+document.getElementById("dlsgf").onclick = () => {
+  if (!D.sgf) { msg("这份页面里没有棋谱数据"); return; }
+  try {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([D.sgf], { type: "application/x-go-sgf;charset=utf-8" }));
+    a.download = D.file || "game.sgf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    msg("已导出 " + (D.file || "game.sgf") + "　若没反应请改用「复制棋谱」");
+  } catch (e) {
+    msg("导出失败, 请改用「复制棋谱」: " + e.message);
+  }
+};
+document.getElementById("cpsgf").onclick = async () => {
+  if (!D.sgf) { msg("这份页面里没有棋谱数据"); return; }
+  try {
+    await navigator.clipboard.writeText(D.sgf);
+    msg("棋谱已复制到剪贴板");
+  } catch {
+    // 剪贴板不可用时退一步: 弹一个可全选的文本框
+    const ta = document.createElement("textarea");
+    ta.value = D.sgf;
+    ta.readOnly = true;
+    ta.setAttribute("style",
+      "position:fixed;left:5%;top:15%;width:90%;height:50%;z-index:99;font:12px monospace;padding:10px");
+    document.body.appendChild(ta);
+    ta.select();
+    msg("剪贴板不可用, 已弹出文本框: 全选复制, 点别处关闭");
+    ta.addEventListener("blur", () => ta.remove());
+  }
+};
+
+/* ── 启动 ── */
+sizeBoard(); buildChart(); buildLists(); goto(NM);
+let rt;
+window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { sizeBoard(); renderBoard(); }, 120); });
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderBoard());
+</script>
