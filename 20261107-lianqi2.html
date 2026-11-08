@@ -1,0 +1,969 @@
+<meta charset="utf-8">
+<!-- viewport 不能省: 作为 Artifact 发布时平台会自带一个, 但产物也会被当独立页面打开
+     (GitHub Pages / 本地文件), 那时没有它 iOS 会按 980px 宽排版再整体缩到屏宽,
+     缩放比约 0.37 —— 字和棋盘都会小得没法看。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- charset 必须留在文档最前面。发布成 Artifact 时平台自带编码声明, 这行多余但无害;
+     而产物同样会被当本地文件直接打开 (微信发文件那条路), 那时没有任何编码声明,
+     浏览器只能猜 —— 中文 Windows 上会猜成 GBK, 中文全部乱码。
+     编码嗅探只扫文档前 1024 字节, 且不要求在文档头部区域内, 所以放这里就够。 -->
+<title>棋手1 vs 棋手2</title>
+<!-- 给微信/其他 IM 的链接卡片用: 爬虫不执行 JS, 只能读这些静态标签。
+     og:url 与 og:image 依赖最终发布地址, 由 publish.sh 在发布时注入。 -->
+<meta name="description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 164 手 · 棋谱未记录结果；KataGo 分析：好手 141，缓手 18，失着 5；可逐手走、看推荐着点、试下后续手顺">
+<meta property="og:type" content="article">
+<meta property="og:title" content="棋手1 vs 棋手2">
+<meta property="og:description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 164 手 · 棋谱未记录结果；KataGo 分析：好手 141，缓手 18，失着 5；可逐手走、看推荐着点、试下后续手顺">
+<meta property="og:site_name" content="围棋复盘">
+<meta property="og:url" content="https://leiliu1990.github.io/go-reviews/20261107-lianqi2.html">
+<style>
+/* 弈客围棋直播室形制: 浅灰实用风, 黑白胜率条是标志元素 */
+:root {
+  --page: #ECECEC;
+  --card: #FFFFFF;
+  --row: #F8F8F8;
+  --row-alt: #F2F2F2;
+  --line: #E2E2E2;
+  --ink: #333333;
+  --ink-2: #4C4C4C;
+  --ink-3: #888888;
+  --tab-bg: #F2F2F2;
+  --tab-on: #FFFFFF;
+  --accent: #1A6E4A;
+  --board: #DCB368;
+  --board-line: #654525;
+  --board-label: #553311;
+  --stone-b: #1B1B1B;
+  --stone-b-hi: #52585A;
+  --stone-w: #FBFAF5;
+  --stone-w-lo: #CFC9B8;
+  --bar-b: #000000;
+  --bar-w: #FFFFFF;
+  --bar-edge: #000000;
+  --chart-b: #2A2A2A;
+  --chart-w: #E4E1D8;
+  --good: #1BAF48;
+  --good-bg: #E7F6EC;
+  --behind: #E0534C;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  /* 纯系统等宽栈: 不依赖外部 CDN (fonts.googleapis.com 在大陆被墙, 会让首屏卡在超时上)。
+     值必须保持单行 —— 它会被 cssVar("--mono") 塞进 canvas 的 ctx.font,
+     带换行的字体串会被 canvas 整体拒绝并静默退回默认字体。 */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #121212;
+    --card: #1C1C1E;
+    --row: #202022;
+    --row-alt: #26262A;
+    --line: #333338;
+    --ink: #E6E6E6;
+    --ink-2: #BFBFBF;
+    --ink-3: #8A8A8E;
+    --tab-bg: #26262A;
+    --tab-on: #1C1C1E;
+    --bar-edge: #5A5A60;
+    --chart-b: #0E0E0F;
+    --chart-w: #C7C2B3;
+    --accent: #58B98A;
+    --board: #C49A54;
+    --board-line: #54381C;
+    --board-label: #46290C;
+    --good: #3FD06C;
+    --good-bg: #13291B;
+    --behind: #F0756E;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #121212;
+  --card: #1C1C1E;
+  --row: #202022;
+  --row-alt: #26262A;
+  --line: #333338;
+  --ink: #E6E6E6;
+  --ink-2: #BFBFBF;
+  --ink-3: #8A8A8E;
+  --tab-bg: #26262A;
+  --tab-on: #1C1C1E;
+  --bar-edge: #5A5A60;
+  --chart-b: #0E0E0F;
+  --chart-w: #C7C2B3;
+  --accent: #58B98A;
+  --board: #C49A54;
+  --board-line: #54381C;
+  --board-label: #46290C;
+  --good: #3FD06C;
+  --good-bg: #13291B;
+  --behind: #F0756E;
+}
+
+* { box-sizing: border-box; }
+/* touch-action: manipulation 告诉浏览器本页只需要平移和双指缩放,
+   于是 iOS 不再等"是不是双击" —— 既去掉了误触双击放大, 也顺带消掉了
+   点击的 300ms 延迟。双指缩放不受影响 (不用 user-scalable=no,
+   那个会连双指缩放一起禁掉, 而且 iOS 10+ 出于无障碍考虑本来就忽略它)。 */
+body { touch-action: manipulation; margin: 0; background: var(--page); color: var(--ink); font-family: var(--sans); font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.app { max-width: 640px; margin: 0 auto; background: var(--card); min-height: 100vh; }
+.pad { padding-inline: 16px; }
+
+/* ── 赛事条 ── */
+.meet { padding: 12px 16px 10px; border-bottom: 1px solid var(--line); }
+.meet .ev { font-size: 17px; font-weight: 600; line-height: 1.35; text-wrap: balance; }
+.meet .sub { font-family: var(--mono); font-size: 13px; color: var(--ink-3); margin-top: 3px; letter-spacing: .02em; }
+
+/* ── 选手行: 黑左 白右 ── */
+.players { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px 0; }
+.side { flex: 1 1 0; min-width: 0; display: flex; gap: 9px; }
+.side.w { flex-direction: row-reverse; text-align: right; }
+.face {
+  flex: 0 0 auto; position: relative; width: 40px; height: 40px; border-radius: 50%;
+  background: var(--row-alt); border: 1px solid var(--line);
+  display: grid; place-items: center; font-size: 15px; font-weight: 600; color: var(--ink-3);
+}
+.face .badge {
+  position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%;
+  border: 1.5px solid var(--card);
+}
+.side.w .face .badge { right: auto; left: -3px; }
+.badge.b { background: radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%); }
+.badge.w { background: radial-gradient(circle at 34% 30%, #FFFFFF, var(--stone-w-lo)); }
+.who { min-width: 0; padding-top: 1px; }
+.nm { font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meta { font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); margin-top: 1px; }
+.wrv { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+/* ── 标志元素: 黑白分割胜率条 ── */
+.vsbar {
+  display: flex; height: 22px; margin: 12px 16px 0;
+  border: 1px solid var(--bar-edge); border-radius: 4px; overflow: hidden;
+  font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.vsbar .l, .vsbar .r { display: grid; place-items: center; min-width: 0; overflow: hidden; transition: width .18s; white-space: nowrap; }
+.vsbar .l { background: var(--bar-b); color: #FFFFFF; }
+.vsbar .r { background: var(--bar-w); color: #000000; }
+
+/* ── 棋盘 ── */
+/* 棋盘满宽 —— 手机上棋盘是主体, 不留左右边距 (.app 最宽 640px, 桌面端也刚好) */
+.boardwrap { padding: 10px 0 0; }
+.bshell { position: relative; width: 100%; aspect-ratio: 1; }
+#board { width: 100%; height: 100%; display: block; touch-action: manipulation; }
+
+/* ── 走子控件 ── */
+/* 走子控件: 一排大按钮。原来的 range 滑杆在手机上太难精确拖,
+   换成 ±1 / ±5 / 首尾 七个键; 跳转仍可点胜率曲线。
+   每个键高 46px —— 比 Apple HIG 的 44pt 最小触摸目标略大。 */
+.transport {
+  display: flex; align-items: stretch; gap: 5px;
+  padding: 10px 10px 12px;
+}
+button.nav {
+  flex: 1 1 0; min-width: 0; min-height: 46px;
+  font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--ink);
+  background: var(--row); border: 1px solid var(--line); border-radius: 7px;
+  padding: 0 2px; cursor: pointer; line-height: 1;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  display: grid; place-items: center;
+}
+button.nav:hover { border-color: var(--accent); color: var(--accent); }
+button.nav:active { background: var(--row-alt); transform: scale(.96); }
+button.nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 「下一手」是用得最多的键: 给两倍宽度并做成主操作色。
+   权重 2 + 其余 5 个各 1 = 7 份; 360px 屏上其余键仍有 ~45px, 不低于 44pt 触摸目标 */
+button.nav#next {
+  flex: 2 1 0; font-size: 20px;
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+button.nav#next:hover { filter: brightness(1.08); color: #fff; }
+button.nav#next:active { background: var(--accent); }
+/* 试下条里的「返回实战」不该跟着走子键一起拉满 */
+.tbar button.nav {
+  flex: 0 0 auto; min-height: 34px; font-size: 13px; padding: 0 12px;
+  font-family: var(--sans);
+}
+
+/* ── 分栏 ── */
+.tabs { display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); }
+.tabs button {
+  flex: 1; appearance: none; border: 0; background: transparent; cursor: pointer;
+  font-family: inherit; font-size: 16px; color: var(--ink-2);
+  padding: 14px 4px 12px; position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+.tabs button[aria-selected="true"] { background: var(--tab-on); color: var(--ink); font-weight: 600; }
+.tabs button[aria-selected="true"]::after {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: 4px;
+  width: 18px; height: 2px; border-radius: 1px; background: var(--accent);
+}
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pane { padding: 0 0 4px; }
+.pane[hidden] { display: none !important; }
+
+/* 推荐着点: 弈客行式列表 (3rem 行高, #f8f8f8 底, 白色分隔) */
+.rrow {
+  display: flex; align-items: center; gap: 12px; min-height: 56px;
+  padding: 0 14px; background: var(--row); border-bottom: 1px solid var(--card);
+  font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums;
+  cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.rrow:nth-child(even) { background: var(--row-alt); }
+.rrow:hover { background: var(--good-bg); }
+.rrow.on { background: var(--good-bg); box-shadow: inset 3px 0 0 var(--good); }
+.rrow.hv { background: var(--good-bg); box-shadow: inset 3px 0 0 var(--ink-3); }
+/* 不优于实战手: 盘上不画, 列表里弱化 */
+.rrow.weak .co, .rrow.weak .wr { color: var(--ink-3); }
+.rrow.weak .chip { opacity: .55; }
+.rrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 编号棋子: 黑子白字 / 白子黑字 */
+.rrow .chip {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+}
+.rrow .chip.b { background: radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%); color: rgba(255,255,255,.9); }
+.rrow .chip.w { background: radial-gradient(circle at 34% 30%, #fff, var(--stone-w-lo)); color: rgba(0,0,0,.7); border: 1px solid var(--line); }
+.rrow .co { font-weight: 600; font-size: 21px; min-width: 2.9em; flex: 0 0 auto; }
+.shizhan { flex: 0 0 auto; color: #fff; font-size: 12.5px; padding: 2px 9px; border-radius: 11px; }
+.rrow .wr { flex: 0 0 auto; font-weight: 600; font-size: 18px; }
+.rrow .sl { flex: 0 0 auto; font-size: 15px; margin-left: auto; }
+.rrow .sl.ahead { color: var(--good); }
+.rrow .sl.behind { color: var(--behind); }
+
+/* 试下条 */
+.tbar {
+  display: flex; align-items: center; gap: 10px; margin: 10px 16px 0;
+  padding: 8px 11px; border-radius: 6px; background: var(--good-bg);
+  border: 1px solid var(--good); font-family: var(--mono); font-size: 14px; color: var(--good);
+}
+.tbar[hidden] { display: none !important; }
+.tbar b { font-weight: 600; }
+.tbar button { margin-left: auto; }
+.tbar button[hidden] { display: none !important; }
+.tbar.preview { background: var(--row-alt); border-color: var(--line); color: var(--ink-2); }
+.phead { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; font-size: 13px; color: var(--ink-3); font-family: var(--mono); }
+.phead .gap { margin-left: auto; }
+
+/* 胜率图 */
+.chartbox { padding: 10px 16px 6px; }
+#chart { display: block; width: 100%; height: auto; aspect-ratio: 480 / 200; overflow: visible; }
+#chart text { font-family: var(--mono); font-size: 12px; fill: var(--ink-3); }
+.cwrap { position: relative; }
+#tip {
+  position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--ink); color: var(--card); border-radius: 4px; padding: 5px 8px;
+  font-family: var(--mono); font-size: 11px; white-space: nowrap;
+  transform: translate(-50%, -100%); z-index: 5; font-variant-numeric: tabular-nums;
+}
+.legend { display: flex; gap: 14px; padding: 0 16px 10px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); flex-wrap: wrap; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: -1px; }
+.legend i.ringdemo {
+  width: 12px; height: 12px; border-radius: 50%; background: #248E35;
+  box-shadow: 0 0 0 1.5px var(--card), 0 0 0 3px var(--ink-2); vertical-align: -2px; margin-right: 6px;
+}
+
+/* 失着榜 */
+.mrow {
+  display: flex; align-items: center; gap: 11px; min-height: 52px; padding: 0 14px;
+  background: var(--row); border-bottom: 1px solid var(--card); cursor: pointer;
+  font-family: var(--mono); font-size: 15px; font-variant-numeric: tabular-nums;
+  -webkit-tap-highlight-color: transparent;
+}
+.mrow:nth-child(even) { background: var(--row-alt); }
+.mrow:hover { background: var(--good-bg); }
+.mrow.on { background: var(--good-bg); }
+.mrow .st { width: 20px; height: 20px; border-radius: 50%; flex: 0 0 auto; }
+.mrow .hn { width: 3.2em; color: var(--ink-3); flex: 0 0 auto; }
+.mrow .co { font-weight: 600; font-size: 18px; width: 3.2em; flex: 0 0 auto; }
+.mrow .ls { width: 4.2em; font-weight: 600; flex: 0 0 auto; }
+.mrow .bm { margin-left: auto; color: var(--ink-3); }
+.sect { padding: 11px 16px 8px; font-size: 13.5px; color: var(--ink-3); font-family: var(--mono); background: var(--card); }
+.none { padding: 16px; color: var(--ink-3); font-family: var(--mono); font-size: 14px; }
+
+/* 导出棋谱 */
+.acts { display: flex; gap: 8px; padding: 14px 14px 0; }
+button.act {
+  flex: 1 1 0; min-height: 48px; font-family: var(--sans); font-size: 15px; font-weight: 600;
+  color: var(--ink); background: var(--row); border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+button.act.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.act:active { transform: scale(.97); }
+button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#actmsg { padding: 8px 14px 0; font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); min-height: 1.2em; }
+footer { padding: 14px 16px 28px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; color: var(--ink-3); }
+footer div + div { margin-top: 2px; }
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <div class="meet">
+    <div class="ev">日常记录</div>
+    <div class="sub">2026-11-07 · 中国规则 · 贴 7.5 目 · 164 手 · 棋谱未记录结果</div>
+  </div>
+
+  <div class="players">
+    <div class="side b">
+      <div class="face">黑<span class="badge b"></span></div>
+      <div class="who">
+        <div class="nm">棋手1</div>
+        <div class="meta">—</div>
+        <div class="wrv" id="bwr">—</div>
+      </div>
+    </div>
+    <div class="side w">
+      <div class="face">白<span class="badge w"></span></div>
+      <div class="who">
+        <div class="nm">棋手2</div>
+        <div class="meta">—</div>
+        <div class="wrv" id="wwr">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="vsbar" role="img" aria-label="双方胜率" id="vsbar">
+    <div class="l" id="vsl"></div>
+    <div class="r" id="vsr"></div>
+  </div>
+
+  <div class="boardwrap">
+    <div class="bshell"><canvas id="board"></canvas></div>
+  </div>
+
+  <div class="tbar" id="tbar" hidden>
+    <span id="tinfo"></span>
+    <button class="nav" id="texit">返回实战</button>
+  </div>
+
+  <div class="transport">
+    <button class="nav" id="first" title="回到开局 (Home)" aria-label="回到开局">|&lt;</button>
+    <button class="nav" id="back5" title="退五手 (Shift+←)" aria-label="退五手">&lt;&lt;</button>
+    <button class="nav" id="prev" title="上一手 (←)" aria-label="上一手">&lt;</button>
+    <button class="nav" id="next" title="下一手 (→)" aria-label="下一手">&gt;</button>
+    <button class="nav" id="fwd5" title="进五手 (Shift+→)" aria-label="进五手">&gt;&gt;</button>
+    <button class="nav" id="last" title="跳到最后 (End)" aria-label="跳到最后">&gt;|</button>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="t0" aria-selected="true" aria-controls="p0">推荐着点</button>
+    <button role="tab" id="t1" aria-selected="false" aria-controls="p1">胜率图</button>
+    <button role="tab" id="t2" aria-selected="false" aria-controls="p2">缓手失着</button>
+  </div>
+
+  <div class="pane" id="p0" role="tabpanel" aria-labelledby="t0">
+    <div class="phead"><span id="rctx">当前局面</span><span class="gap" id="rgap"></span></div>
+    <div id="rlist"></div>
+  </div>
+
+  <div class="pane" id="p1" role="tabpanel" aria-labelledby="t1" hidden>
+    <div class="chartbox">
+      <div class="cwrap">
+        <svg id="chart" aria-label="逐手胜率曲线"></svg>
+        <div id="tip"></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="ringdemo"></i>实战手(带外圈)</span>
+      <span><i style="background:var(--chart-b)"></i>黑优</span>
+      <span><i style="background:var(--chart-w)"></i>白优</span>
+      <span><i style="background:#82AA28"></i>缓手</span>
+      <span><i style="background:#EB8C00"></i>失着</span>
+      <span><i style="background:rgb(220,0,0)"></i>大失着</span>
+    </div>
+  </div>
+
+  <div class="pane" id="p2" role="tabpanel" aria-labelledby="t2" hidden>
+    <div class="sect">黑方</div><div id="listB"></div>
+    <div class="sect">白方</div><div id="listW"></div>
+  </div>
+
+  <div class="acts">
+    <button class="act primary" id="dlsgf" type="button">导出 SGF</button>
+    <button class="act" id="cpsgf" type="button">复制棋谱</button>
+  </div>
+  <div id="actmsg"></div>
+
+  <footer>
+    <div>KataGo kata1-b18c384nbt-s9996604416-d4316597426 · 200 visits/手 · 缓手 10% / 失着 20%</div>
+    <div>生成于 2026-11-08 16:38 · 来源 本地棋谱 #lianqi2</div>
+  </footer>
+</div>
+
+<script>
+const D = {"meta":{"boardSize":19,"komi":7.5,"rules":"chinese","handicap":0,"initialStones":[]},"moves":[{"color":"B","gtp":"Q16"},{"color":"W","gtp":"D17"},{"color":"B","gtp":"Q3"},{"color":"W","gtp":"D4"},{"color":"B","gtp":"C15"},{"color":"W","gtp":"C16"},{"color":"B","gtp":"D15"},{"color":"W","gtp":"F17"},{"color":"B","gtp":"D11"},{"color":"W","gtp":"R5"},{"color":"B","gtp":"P4"},{"color":"W","gtp":"R8"},{"color":"B","gtp":"C6"},{"color":"W","gtp":"F3"},{"color":"B","gtp":"C4"},{"color":"W","gtp":"C3"},{"color":"B","gtp":"B3"},{"color":"W","gtp":"C5"},{"color":"B","gtp":"B4"},{"color":"W","gtp":"D5"},{"color":"B","gtp":"B5"},{"color":"W","gtp":"D6"},{"color":"B","gtp":"C7"},{"color":"W","gtp":"R17"},{"color":"B","gtp":"R16"},{"color":"W","gtp":"Q17"},{"color":"B","gtp":"P16"},{"color":"W","gtp":"O18"},{"color":"B","gtp":"R10"},{"color":"W","gtp":"Q10"},{"color":"B","gtp":"R11"},{"color":"W","gtp":"R9"},{"color":"B","gtp":"K3"},{"color":"W","gtp":"C2"},{"color":"B","gtp":"R4"},{"color":"W","gtp":"Q5"},{"color":"B","gtp":"P5"},{"color":"W","gtp":"Q11"},{"color":"B","gtp":"R12"},{"color":"W","gtp":"Q12"},{"color":"B","gtp":"R13"},{"color":"W","gtp":"H3"},{"color":"B","gtp":"Q7"},{"color":"W","gtp":"R7"},{"color":"B","gtp":"P9"},{"color":"W","gtp":"Q9"},{"color":"B","gtp":"E16"},{"color":"W","gtp":"E17"},{"color":"B","gtp":"O7"},{"color":"W","gtp":"B13"},{"color":"B","gtp":"B16"},{"color":"W","gtp":"C10"},{"color":"B","gtp":"C11"},{"color":"W","gtp":"B11"},{"color":"B","gtp":"B12"},{"color":"W","gtp":"C12"},{"color":"B","gtp":"B10"},{"color":"W","gtp":"A12"},{"color":"B","gtp":"C9"},{"color":"W","gtp":"D10"},{"color":"B","gtp":"E10"},{"color":"W","gtp":"D9"},{"color":"B","gtp":"B9"},{"color":"W","gtp":"E11"},{"color":"B","gtp":"D12"},{"color":"W","gtp":"D13"},{"color":"B","gtp":"E12"},{"color":"W","gtp":"E13"},{"color":"B","gtp":"F12"},{"color":"W","gtp":"F13"},{"color":"B","gtp":"C18"},{"color":"W","gtp":"E9"},{"color":"B","gtp":"F11"},{"color":"W","gtp":"F9"},{"color":"B","gtp":"H12"},{"color":"W","gtp":"J13"},{"color":"B","gtp":"H13"},{"color":"W","gtp":"H14"},{"color":"B","gtp":"J14"},{"color":"W","gtp":"K14"},{"color":"B","gtp":"J15"},{"color":"W","gtp":"H15"},{"color":"B","gtp":"K15"},{"color":"W","gtp":"F15"},{"color":"B","gtp":"L15"},{"color":"W","gtp":"B15"},{"color":"B","gtp":"C17"},{"color":"W","gtp":"B14"},{"color":"B","gtp":"A17"},{"color":"W","gtp":"D18"},{"color":"B","gtp":"B18"},{"color":"W","gtp":"S5"},{"color":"B","gtp":"S4"},{"color":"W","gtp":"T4"},{"color":"B","gtp":"T3"},{"color":"W","gtp":"T5"},{"color":"B","gtp":"D16"},{"color":"W","gtp":"S3"},{"color":"B","gtp":"S2"},{"color":"W","gtp":"T2"},{"color":"B","gtp":"R2"},{"color":"W","gtp":"K4"},{"color":"B","gtp":"L4"},{"color":"W","gtp":"J4"},{"color":"B","gtp":"L3"},{"color":"W","gtp":"J9"},{"color":"B","gtp":"K11"},{"color":"W","gtp":"L5"},{"color":"B","gtp":"K6"},{"color":"W","gtp":"K5"},{"color":"B","gtp":"K8"},{"color":"W","gtp":"M5"},{"color":"B","gtp":"J2"},{"color":"W","gtp":"N3"},{"color":"B","gtp":"N2"},{"color":"W","gtp":"N4"},{"color":"B","gtp":"O2"},{"color":"W","gtp":"S16"},{"color":"B","gtp":"S15"},{"color":"W","gtp":"S17"},{"color":"B","gtp":"D7"},{"color":"W","gtp":"E7"},{"color":"B","gtp":"Q13"},{"color":"W","gtp":"O12"},{"color":"B","gtp":"H17"},{"color":"W","gtp":"G17"},{"color":"B","gtp":"F7"},{"color":"W","gtp":"E6"},{"color":"B","gtp":"H7"},{"color":"W","gtp":"H8"},{"color":"B","gtp":"N13"},{"color":"W","gtp":"K9"},{"color":"B","gtp":"L8"},{"color":"W","gtp":"L9"},{"color":"B","gtp":"J8"},{"color":"W","gtp":"H9"},{"color":"B","gtp":"M8"},{"color":"W","gtp":"L12"},{"color":"B","gtp":"L11"},{"color":"W","gtp":"M12"},{"color":"B","gtp":"N12"},{"color":"W","gtp":"M11"},{"color":"B","gtp":"K12"},{"color":"W","gtp":"M9"},{"color":"B","gtp":"N11"},{"color":"W","gtp":"N10"},{"color":"B","gtp":"O10"},{"color":"W","gtp":"N8"},{"color":"B","gtp":"N7"},{"color":"W","gtp":"J7"},{"color":"B","gtp":"O8"},{"color":"W","gtp":"N9"},{"color":"B","gtp":"O17"},{"color":"W","gtp":"N18"},{"color":"B","gtp":"Q6"},{"color":"W","gtp":"S10"},{"color":"B","gtp":"S11"},{"color":"W","gtp":"T10"},{"color":"B","gtp":"R6"},{"color":"W","gtp":"S6"},{"color":"B","gtp":"T7"},{"color":"W","gtp":"T8"},{"color":"B","gtp":"S8"},{"color":"W","gtp":"S9"}],"analysis":[{"winrate":0.3734,"scoreLead":-0.95,"topMoves":[{"move":"Q16","winrate":0.3744,"scoreLead":-0.94,"pv":["Q16","D4","C3","D3","C4"]},{"move":"Q4","winrate":0.3744,"scoreLead":-0.94,"pv":["Q4","D16","C17","D17","C16"]},{"move":"D16","winrate":0.3744,"scoreLead":-0.94,"pv":["D16","Q4","R3","Q3","R4"]}]},{"winrate":0.3703,"scoreLead":-0.97,"topMoves":[{"move":"D4","winrate":0.3696,"scoreLead":-0.97,"pv":["D4","Q4","D16","F3","R17"]},{"move":"D16","winrate":0.3706,"scoreLead":-0.96,"pv":["D16","C17","D17","C16","D15"]},{"move":"Q4","winrate":0.3706,"scoreLead":-0.96,"pv":["Q4","R3","R4","Q3","P4"]}]},{"winrate":0.3916,"scoreLead":-0.82,"topMoves":[{"move":"D4","winrate":0.395,"scoreLead":-0.79,"pv":["D4","Q4","C15","E16","R3"]},{"move":"Q4","winrate":0.3907,"scoreLead":-0.82,"pv":["Q4","D4","C3","D3","C4"]},{"move":"C15","winrate":0.382,"scoreLead":-0.95,"pv":["C15","D4","Q4","E16","C3"]}]},{"winrate":0.3843,"scoreLead":-0.92,"topMoves":[{"move":"D4","winrate":0.3831,"scoreLead":-0.94,"pv":["D4","C3","C4","D3","E4"]},{"move":"D3","winrate":0.3926,"scoreLead":-0.82,"pv":["D3","C15","D5","E16","E17"]},{"move":"C4","winrate":0.3977,"scoreLead":-0.77,"pv":["C4","E4","E3","F3","D3"]}]},{"winrate":0.3822,"scoreLead":-0.92,"topMoves":[{"move":"C3","winrate":0.383,"scoreLead":-0.88,"pv":["C3","C4","D3","E4","F3"]},{"move":"C15","winrate":0.3835,"scoreLead":-0.95,"pv":["C15","C16","D15","F17","C6"]},{"move":"F3","winrate":0.3819,"scoreLead":-0.97,"pv":["F3","R5","P4","C14","C6"]}]},{"winrate":0.3844,"scoreLead":-0.92,"topMoves":[{"move":"E16","winrate":0.3814,"scoreLead":-0.93,"pv":["E16","F3","D6","E5","D5"]},{"move":"C16","winrate":0.3861,"scoreLead":-0.94,"pv":["C16","D15","F17","C6","C10"]},{"move":"R5","winrate":0.3879,"scoreLead":-0.86,"pv":["R5","E16","E17","F16","G18"]}]},{"winrate":0.3862,"scoreLead":-0.95,"topMoves":[{"move":"D15","winrate":0.3862,"scoreLead":-0.96,"pv":["D15","F17","C6","C10","C8"]},{"move":"E16","winrate":0.3497,"scoreLead":-1.13,"pv":["E16","E17","F16","B15","C14"]},{"move":"C3","winrate":0.3554,"scoreLead":-1.14,"pv":["C3","C4","D15","D3"]}]},{"winrate":0.3854,"scoreLead":-0.95,"topMoves":[{"move":"F17","winrate":0.3846,"scoreLead":-0.96,"pv":["F17","C6","C10","C8","E10"]},{"move":"F16","winrate":0.3932,"scoreLead":-0.86,"pv":["F16","D11","R5","P4","R17"]},{"move":"E16","winrate":0.4124,"scoreLead":-0.66,"pv":["E16","F14","H16","C6","C10"]}]},{"winrate":0.3849,"scoreLead":-0.97,"topMoves":[{"move":"F3","winrate":0.3864,"scoreLead":-0.96,"pv":["F3","C11","D6","G15","E12"]},{"move":"C6","winrate":0.3871,"scoreLead":-0.97,"pv":["C6","C10","C8","E10","B4"]},{"move":"D11","winrate":0.3769,"scoreLead":-0.96,"pv":["D11","R5","P4","R8","C6"]}]},{"winrate":0.382,"scoreLead":-0.92,"topMoves":[{"move":"R5","winrate":0.3802,"scoreLead":-0.94,"pv":["R5","P4","R8","C6","F3"]},{"move":"R17","winrate":0.3851,"scoreLead":-0.9,"pv":["R17","R16","Q17","P16","P17"]},{"move":"Q5","winrate":0.3869,"scoreLead":-0.83,"pv":["Q5","R5","R6","R4","Q6"]}]},{"winrate":0.3812,"scoreLead":-0.94,"topMoves":[{"move":"P4","winrate":0.384,"scoreLead":-0.88,"pv":["P4","R8","C6","F3","E6"]},{"move":"Q8","winrate":0.379,"scoreLead":-0.99,"pv":["Q8","P4","Q4","Q5","P5"]},{"move":"Q7","winrate":0.3785,"scoreLead":-1.0,"pv":["Q7","P5","O4","R16","R17"]}]},{"winrate":0.3848,"scoreLead":-0.86,"topMoves":[{"move":"Q9","winrate":0.3797,"scoreLead":-0.92,"pv":["Q9","C6","F3","B4","C3"]},{"move":"R8","winrate":0.3826,"scoreLead":-0.86,"pv":["R8","C6","F3","B4","J3"]},{"move":"Q8","winrate":0.3855,"scoreLead":-0.89,"pv":["Q8","C6","F3","R10","R17"]}]},{"winrate":0.3803,"scoreLead":-0.86,"topMoves":[{"move":"C6","winrate":0.3822,"scoreLead":-0.84,"pv":["C6","F3","B4","J3","R14"]},{"move":"F3","winrate":0.3672,"scoreLead":-1.05,"pv":["F3","E3","F4","D6","K4"]},{"move":"E16","winrate":0.3693,"scoreLead":-0.99,"pv":["E16","E17","C6","F3","B4"]}]},{"winrate":0.3842,"scoreLead":-0.83,"topMoves":[{"move":"F3","winrate":0.3837,"scoreLead":-0.84,"pv":["F3","B4","J3","R14","C9"]},{"move":"R17","winrate":0.4047,"scoreLead":-0.63,"pv":["R17","Q17","R16","Q15","R15"]},{"move":"G3","winrate":0.4203,"scoreLead":-0.58,"pv":["G3","C3","C4","D3","E4"]}]},{"winrate":0.383,"scoreLead":-0.85,"topMoves":[{"move":"B4","winrate":0.3866,"scoreLead":-0.8,"pv":["B4","J3","R14","D7","C7"]},{"move":"E6","winrate":0.3805,"scoreLead":-0.88,"pv":["E6","B4","G4","F4","G5"]},{"move":"C4","winrate":0.3774,"scoreLead":-0.93,"pv":["C4","C3","B3","C5","B4"]}]},{"winrate":0.3653,"scoreLead":-1.0,"topMoves":[{"move":"C3","winrate":0.3652,"scoreLead":-1.0,"pv":["C3","B3","C5","B4","D6"]},{"move":"D5","winrate":0.4674,"scoreLead":-0.03,"pv":["D5","C3"]},{"move":"C5","winrate":0.4901,"scoreLead":-0.01,"pv":["C5"]}]},{"winrate":0.3634,"scoreLead":-1.02,"topMoves":[{"move":"B3","winrate":0.3636,"scoreLead":-1.01,"pv":["B3","C5","B4","D6","B5"]},{"move":"E16","winrate":0.3302,"scoreLead":-1.42,"pv":["E16","C5","E17","E18","F18"]},{"move":"D16","winrate":0.3272,"scoreLead":-1.51,"pv":["D16","C17","B3"]}]},{"winrate":0.3601,"scoreLead":-1.04,"topMoves":[{"move":"C5","winrate":0.3565,"scoreLead":-1.07,"pv":["C5","B4","D6","B5","D5"]},{"move":"C2","winrate":0.3746,"scoreLead":-0.92,"pv":["C2","D5","B4","C5","B2"]},{"move":"B2","winrate":0.4199,"scoreLead":-0.59,"pv":["B2","B4","D3","E6","D9"]}]},{"winrate":0.3584,"scoreLead":-1.05,"topMoves":[{"move":"B4","winrate":0.3582,"scoreLead":-1.05,"pv":["B4","D6","B5","D5","C7"]},{"move":"E18","winrate":0.1382,"scoreLead":-4.7,"pv":["E18"]},{"move":"D16","winrate":0.0758,"scoreLead":-7.37,"pv":["D16"]}]},{"winrate":0.3566,"scoreLead":-1.07,"topMoves":[{"move":"D6","winrate":0.3549,"scoreLead":-1.08,"pv":["D6","B5","D5","C7","M3"]},{"move":"D5","winrate":0.382,"scoreLead":-0.86,"pv":["D5","B5","E7","D3","K4"]},{"move":"B5","winrate":0.4297,"scoreLead":-0.53,"pv":["B5"]}]},{"winrate":0.365,"scoreLead":-0.98,"topMoves":[{"move":"D3","winrate":0.3802,"scoreLead":-0.83,"pv":["D3","C2","D2","B2","A2"]},{"move":"B5","winrate":0.3577,"scoreLead":-1.05,"pv":["B5","D6","C7","M3","H4"]},{"move":"C2","winrate":0.3223,"scoreLead":-1.29,"pv":["C2","D3","B5","E7"]}]},{"winrate":0.3574,"scoreLead":-1.05,"topMoves":[{"move":"D6","winrate":0.355,"scoreLead":-1.07,"pv":["D6","C7","M3","H4","H2"]},{"move":"E7","winrate":0.3895,"scoreLead":-0.77,"pv":["E7","D3","C2","D2","E2"]},{"move":"R17","winrate":0.3969,"scoreLead":-0.72,"pv":["R17","Q17","R16","Q15"]}]},{"winrate":0.355,"scoreLead":-1.07,"topMoves":[{"move":"C7","winrate":0.3556,"scoreLead":-1.07,"pv":["C7","M3","H4","H2","R14"]},{"move":"D7","winrate":0.3378,"scoreLead":-1.24,"pv":["D7","E7","C7","E8","L4"]},{"move":"E16","winrate":0.3287,"scoreLead":-1.38,"pv":["E16","E17"]}]},{"winrate":0.3553,"scoreLead":-1.07,"topMoves":[{"move":"M3","winrate":0.3512,"scoreLead":-1.11,"pv":["M3","H4","H2","R4","Q5"]},{"move":"L3","winrate":0.3689,"scoreLead":-0.95,"pv":["L3","E8","O3","O4","N3"]},{"move":"K4","winrate":0.3766,"scoreLead":-0.84,"pv":["K4","M3","O17","P17","O16"]}]},{"winrate":0.3701,"scoreLead":-0.93,"topMoves":[{"move":"Q17","winrate":0.3708,"scoreLead":-0.93,"pv":["Q17","R16","Q15","R15","Q14"]},{"move":"R16","winrate":0.3479,"scoreLead":-1.14,"pv":["R16","Q17","P16","P17","O17"]},{"move":"E16","winrate":0.3476,"scoreLead":-1.13,"pv":["E16","Q17","E17","E18","F18"]}]},{"winrate":0.3328,"scoreLead":-1.3,"topMoves":[{"move":"Q17","winrate":0.3327,"scoreLead":-1.3,"pv":["Q17","P16","P17","O17","O18"]},{"move":"Q18","winrate":0.5769,"scoreLead":0.96,"pv":["Q18"]},{"move":"O3","winrate":0.5098,"scoreLead":0.52,"pv":["O3"]}]},{"winrate":0.3303,"scoreLead":-1.33,"topMoves":[{"move":"P16","winrate":0.3322,"scoreLead":-1.32,"pv":["P16","P17","O17","O18","J3"]},{"move":"P17","winrate":0.3229,"scoreLead":-1.36,"pv":["P17","P18","O18","O17","P16"]},{"move":"O17","winrate":0.316,"scoreLead":-1.45,"pv":["O17","P17","O16","P16","P15"]}]},{"winrate":0.3298,"scoreLead":-1.34,"topMoves":[{"move":"P17","winrate":0.3265,"scoreLead":-1.37,"pv":["P17","O17","O18","J3","D7"]},{"move":"O18","winrate":0.3547,"scoreLead":-1.11,"pv":["O18","K3","Q12","H3","D7"]},{"move":"O17","winrate":0.3565,"scoreLead":-1.08,"pv":["O17","J3","N18","D3","D7"]}]},{"winrate":0.3497,"scoreLead":-1.15,"topMoves":[{"move":"K3","winrate":0.3546,"scoreLead":-1.08,"pv":["K3","Q12","H3","D7","D8"]},{"move":"J3","winrate":0.3496,"scoreLead":-1.16,"pv":["J3","D7","D8","E8","D9"]},{"move":"E16","winrate":0.3467,"scoreLead":-1.15,"pv":["E16","E17","J3","D7","D8"]}]},{"winrate":0.3279,"scoreLead":-1.35,"topMoves":[{"move":"M3","winrate":0.3212,"scoreLead":-1.44,"pv":["M3","H4","D7","D8","E8"]},{"move":"K4","winrate":0.3324,"scoreLead":-1.28,"pv":["K4","M3","E8","R4","S5"]},{"move":"K3","winrate":0.3383,"scoreLead":-1.17,"pv":["K3","R4","S5","M3","E8"]}]},{"winrate":0.3929,"scoreLead":-0.73,"topMoves":[{"move":"Q11","winrate":0.3966,"scoreLead":-0.7,"pv":["Q11","Q9","H4","M3","G3"]},{"move":"O17","winrate":0.3576,"scoreLead":-1.06,"pv":["O17","N17","Q11","Q9","N16"]},{"move":"E16","winrate":0.3472,"scoreLead":-1.15,"pv":["E16","R11","E17","E18","F18"]}]},{"winrate":0.3116,"scoreLead":-1.43,"topMoves":[{"move":"Q11","winrate":0.3038,"scoreLead":-1.48,"pv":["Q11","Q12","R9","P12","R12"]},{"move":"M3","winrate":0.3219,"scoreLead":-1.39,"pv":["M3","R4","Q11","Q12","R9"]},{"move":"N3","winrate":0.3288,"scoreLead":-1.33,"pv":["N3","R4","S5","Q5","K4"]}]},{"winrate":0.3988,"scoreLead":-0.68,"topMoves":[{"move":"Q11","winrate":0.3997,"scoreLead":-0.67,"pv":["Q11","M3","R4","P10","P11"]},{"move":"O17","winrate":0.3724,"scoreLead":-0.91,"pv":["O17","N17","Q11","M3","R4"]},{"move":"E16","winrate":0.3452,"scoreLead":-1.16,"pv":["E16","Q11","E17","E18","F18"]}]},{"winrate":0.2969,"scoreLead":-1.61,"topMoves":[{"move":"Q11","winrate":0.296,"scoreLead":-1.62,"pv":["Q11","R13","M3","L4","N5"]},{"move":"M3","winrate":0.3501,"scoreLead":-1.18,"pv":["M3","Q11","M5","R4"]},{"move":"L4","winrate":0.3582,"scoreLead":-1.12,"pv":["L4","K4","Q11","D3","D7"]}]},{"winrate":0.4253,"scoreLead":-0.46,"topMoves":[{"move":"Q11","winrate":0.4262,"scoreLead":-0.45,"pv":["Q11","P10","P11","D10","D7"]},{"move":"O17","winrate":0.395,"scoreLead":-0.69,"pv":["O17","N17","Q11","D10","D7"]},{"move":"E16","winrate":0.3854,"scoreLead":-0.81,"pv":["E16","Q11","E17","E18","F18"]}]},{"winrate":0.2743,"scoreLead":-1.73,"topMoves":[{"move":"Q11","winrate":0.2736,"scoreLead":-1.74,"pv":["Q11","R13","D10","D7","E11"]},{"move":"D10","winrate":0.3341,"scoreLead":-1.21,"pv":["D10","Q11","C11","B9"]},{"move":"S4","winrate":0.3332,"scoreLead":-1.2,"pv":["S4","S3","Q11","Q12","R12"]}]},{"winrate":0.4459,"scoreLead":-0.29,"topMoves":[{"move":"Q11","winrate":0.4469,"scoreLead":-0.28,"pv":["Q11","P10","P11","D10","D7"]},{"move":"O17","winrate":0.4198,"scoreLead":-0.49,"pv":["O17","N17","Q11","P10","P18"]},{"move":"G3","winrate":0.3715,"scoreLead":-0.96,"pv":["G3","G2","H3","Q11"]}]},{"winrate":0.295,"scoreLead":-1.57,"topMoves":[{"move":"Q11","winrate":0.2944,"scoreLead":-1.57,"pv":["Q11","R13","R12","S12","Q12"]},{"move":"D10","winrate":0.3575,"scoreLead":-1.06,"pv":["D10","Q11","C11","C12"]},{"move":"S4","winrate":0.3569,"scoreLead":-1.06,"pv":["S4","S3","Q11","R12","Q12"]}]},{"winrate":0.2967,"scoreLead":-1.52,"topMoves":[{"move":"R13","winrate":0.2998,"scoreLead":-1.43,"pv":["R13","R12","S12","Q12","G3"]},{"move":"R12","winrate":0.2974,"scoreLead":-1.51,"pv":["R12","D10","D7","E11","C11"]},{"move":"O17","winrate":0.3014,"scoreLead":-1.46,"pv":["O17","P17","R12","Q12","R13"]}]},{"winrate":0.3039,"scoreLead":-1.45,"topMoves":[{"move":"D10","winrate":0.2991,"scoreLead":-1.48,"pv":["D10","D7","E11","C11","E12"]},{"move":"Q12","winrate":0.3092,"scoreLead":-1.39,"pv":["Q12","R13","D10","D7","E11"]},{"move":"L4","winrate":0.3071,"scoreLead":-1.46,"pv":["L4","G3","G2","H3","L3"]}]},{"winrate":0.3078,"scoreLead":-1.42,"topMoves":[{"move":"R13","winrate":0.3083,"scoreLead":-1.41,"pv":["R13","D10","D7","E11","C11"]},{"move":"O17","winrate":0.28,"scoreLead":-1.68,"pv":["O17","N17","P18","P17","O16"]},{"move":"R14","winrate":0.2464,"scoreLead":-1.93,"pv":["R14","D10"]}]},{"winrate":0.3061,"scoreLead":-1.43,"topMoves":[{"move":"D10","winrate":0.3023,"scoreLead":-1.45,"pv":["D10","D7","E11","C11","E12"]},{"move":"L4","winrate":0.3097,"scoreLead":-1.45,"pv":["L4","G3","G2","H3","L3"]},{"move":"E9","winrate":0.3278,"scoreLead":-1.19,"pv":["E9","D7","D10","F8","E11"]}]},{"winrate":0.331,"scoreLead":-1.19,"topMoves":[{"move":"E8","winrate":0.3367,"scoreLead":-1.16,"pv":["E8","L4","M3","F10","E10"]},{"move":"D7","winrate":0.3263,"scoreLead":-1.13,"pv":["D7","O8","K5","S16","S15"]},{"move":"P7","winrate":0.3154,"scoreLead":-1.27,"pv":["P7","D10","C10","C9","D9"]}]},{"winrate":0.2415,"scoreLead":-2.2,"topMoves":[{"move":"S5","winrate":0.2341,"scoreLead":-2.31,"pv":["S5","O8","P6","P7","O6"]},{"move":"D10","winrate":0.2397,"scoreLead":-2.09,"pv":["D10","C10","S5","O7","C9"]},{"move":"S6","winrate":0.285,"scoreLead":-1.59,"pv":["S6","S4","P6","P9","P7"]}]},{"winrate":0.3996,"scoreLead":-0.61,"topMoves":[{"move":"E8","winrate":0.404,"scoreLead":-0.58,"pv":["E8","L4","K4","L3","L5"]},{"move":"D7","winrate":0.4008,"scoreLead":-0.58,"pv":["D7","O7","P6","L4","K4"]},{"move":"P9","winrate":0.3912,"scoreLead":-0.65,"pv":["P9","P8","O8","P6","O6"]}]},{"winrate":0.4,"scoreLead":-0.57,"topMoves":[{"move":"P8","winrate":0.3934,"scoreLead":-0.63,"pv":["P8","E8","O9","O8","O7"]},{"move":"P6","winrate":0.3936,"scoreLead":-0.6,"pv":["P6","P7","Q6","O6","O7"]},{"move":"Q9","winrate":0.4455,"scoreLead":-0.23,"pv":["Q9","E8","L4","K4","L3"]}]},{"winrate":0.4514,"scoreLead":-0.19,"topMoves":[{"move":"E8","winrate":0.4584,"scoreLead":-0.15,"pv":["E8","L4","J3","L3","K5"]},{"move":"D7","winrate":0.4319,"scoreLead":-0.29,"pv":["D7","S16","S15","S17","O7"]},{"move":"S5","winrate":0.3936,"scoreLead":-0.56,"pv":["S5","D10","C10","C9"]}]},{"winrate":0.4453,"scoreLead":-0.23,"topMoves":[{"move":"E17","winrate":0.446,"scoreLead":-0.22,"pv":["E17","E8","S16","S15","S17"]},{"move":"S16","winrate":0.4393,"scoreLead":-0.23,"pv":["S16","S15","E17","O17","N17"]},{"move":"F16","winrate":0.4809,"scoreLead":0.08,"pv":["F16","E17","E18","F18","D18"]}]},{"winrate":0.451,"scoreLead":-0.19,"topMoves":[{"move":"E8","winrate":0.456,"scoreLead":-0.16,"pv":["E8","S16","S15","S17","O7"]},{"move":"D7","winrate":0.4214,"scoreLead":-0.34,"pv":["D7","S16","S15","S17","O7"]},{"move":"S5","winrate":0.3828,"scoreLead":-0.73,"pv":["S5","D10","C10","C9","D9"]}]},{"winrate":0.3602,"scoreLead":-0.92,"topMoves":[{"move":"D10","winrate":0.3543,"scoreLead":-0.97,"pv":["D10","D9","E10","C10","C11"]},{"move":"D9","winrate":0.4162,"scoreLead":-0.43,"pv":["D9","D7","B9","B11","E11"]},{"move":"C9","winrate":0.4246,"scoreLead":-0.43,"pv":["C9","D9","D10","E10","C10"]}]},{"winrate":0.4486,"scoreLead":-0.15,"topMoves":[{"move":"B16","winrate":0.4514,"scoreLead":-0.13,"pv":["B16","C10","D10","B8","C11"]},{"move":"O17","winrate":0.4126,"scoreLead":-0.39,"pv":["O17","P17","B16","B17","C12"]},{"move":"B15","winrate":0.3707,"scoreLead":-0.83,"pv":["B15","C9","C12"]}]},{"winrate":0.4447,"scoreLead":-0.19,"topMoves":[{"move":"C10","winrate":0.4146,"scoreLead":-0.49,"pv":["C10","B8","B17","C13","C12"]},{"move":"B17","winrate":0.457,"scoreLead":-0.05,"pv":["B17","D16","C17","C12","E8"]},{"move":"C9","winrate":0.4552,"scoreLead":-0.12,"pv":["C9","C12","D10","E11","D7"]}]},{"winrate":0.4203,"scoreLead":-0.44,"topMoves":[{"move":"C13","winrate":0.47,"scoreLead":-0.03,"pv":["C13","B8","C11","B7","B6"]},{"move":"C11","winrate":0.4214,"scoreLead":-0.46,"pv":["C11","B11","C13","B8","D7"]},{"move":"D10","winrate":0.4068,"scoreLead":-0.65,"pv":["D10","B8","D7","C11","C9"]}]},{"winrate":0.4453,"scoreLead":-0.22,"topMoves":[{"move":"B11","winrate":0.4413,"scoreLead":-0.25,"pv":["B11","C13","D10","B14","B8"]},{"move":"D10","winrate":0.5052,"scoreLead":0.32,"pv":["D10","B11","B17","D7","E10"]},{"move":"B17","winrate":0.5572,"scoreLead":0.63,"pv":["B17","D10","D13"]}]},{"winrate":0.4478,"scoreLead":-0.19,"topMoves":[{"move":"C13","winrate":0.4564,"scoreLead":-0.1,"pv":["C13","D10","B9","B10","B14"]},{"move":"D10","winrate":0.4305,"scoreLead":-0.38,"pv":["D10","C9","B8","C12","D13"]},{"move":"B9","winrate":0.3931,"scoreLead":-0.68,"pv":["B9","B10","C9","D10","B14"]}]},{"winrate":0.1241,"scoreLead":-4.55,"topMoves":[{"move":"C12","winrate":0.1189,"scoreLead":-4.63,"pv":["C12","B10","A12","D10","C9"]},{"move":"C8","winrate":0.3993,"scoreLead":-0.63,"pv":["C8","B10","B7","B6"]},{"move":"A12","winrate":0.3875,"scoreLead":-0.78,"pv":["A12","C12","B9","D9","C8"]}]},{"winrate":0.121,"scoreLead":-4.47,"topMoves":[{"move":"D10","winrate":0.1299,"scoreLead":-4.19,"pv":["D10","C9","B10","A12","B9"]},{"move":"B10","winrate":0.1187,"scoreLead":-4.56,"pv":["B10","A12","D10","C9","B9"]},{"move":"D12","winrate":0.1015,"scoreLead":-4.58,"pv":["D12","A12","D13","B8","D7"]}]},{"winrate":0.1165,"scoreLead":-4.29,"topMoves":[{"move":"A12","winrate":0.1159,"scoreLead":-4.3,"pv":["A12","B9","D12","B17","E11"]},{"move":"S16","winrate":0.4252,"scoreLead":-0.23,"pv":["S16"]},{"move":"S15","winrate":0.6243,"scoreLead":2.06,"pv":["S15"]}]},{"winrate":0.1326,"scoreLead":-3.66,"topMoves":[{"move":"B9","winrate":0.1384,"scoreLead":-3.42,"pv":["B9","D12","B17","C18","G15"]},{"move":"D10","winrate":0.0857,"scoreLead":-5.45,"pv":["D10","C9","B9","D9","E9"]},{"move":"C9","winrate":0.0764,"scoreLead":-6.07,"pv":["C9","D10","E10","D9","B9"]}]},{"winrate":0.0774,"scoreLead":-7.04,"topMoves":[{"move":"D10","winrate":0.0713,"scoreLead":-7.23,"pv":["D10","E10","D9","B9","E11"]},{"move":"B17","winrate":0.243,"scoreLead":-1.75,"pv":["B17","D10","E13","D16"]},{"move":"E14","winrate":0.2968,"scoreLead":-1.36,"pv":["E14","D10","B17"]}]},{"winrate":0.0611,"scoreLead":-7.84,"topMoves":[{"move":"E10","winrate":0.0636,"scoreLead":-7.77,"pv":["E10","D9","B9","E11","D12"]},{"move":"C18","winrate":0.0195,"scoreLead":-9.12,"pv":["C18","B15","B14"]},{"move":"O17","winrate":0.0229,"scoreLead":-8.83,"pv":["O17","N17","P18"]}]},{"winrate":0.0424,"scoreLead":-9.02,"topMoves":[{"move":"D9","winrate":0.0421,"scoreLead":-9.03,"pv":["D9","B9","E11","D12","D13"]},{"move":"S16","winrate":0.4628,"scoreLead":0.16,"pv":["S16"]},{"move":"B15","winrate":0.3535,"scoreLead":-0.62,"pv":["B15"]}]},{"winrate":0.0438,"scoreLead":-8.98,"topMoves":[{"move":"B9","winrate":0.0439,"scoreLead":-8.97,"pv":["B9","E11","D12","D13","E12"]},{"move":"D8","winrate":0.0439,"scoreLead":-10.82,"pv":["D8","E9","F9","E8","E7"]},{"move":"E9","winrate":0.0313,"scoreLead":-8.32,"pv":["E9","D8","B9","E11","D12"]}]},{"winrate":0.0404,"scoreLead":-9.22,"topMoves":[{"move":"E11","winrate":0.0346,"scoreLead":-9.54,"pv":["E11","D12","D13","E12","E13"]},{"move":"E14","winrate":0.1556,"scoreLead":-3.35,"pv":["E14","E11","D13","C17","D16"]},{"move":"B17","winrate":0.1519,"scoreLead":-2.95,"pv":["B17","D16","C17","E12","E13"]}]},{"winrate":0.0332,"scoreLead":-9.64,"topMoves":[{"move":"D12","winrate":0.0334,"scoreLead":-9.65,"pv":["D12","D13","E12","E13","F12"]},{"move":"C17","winrate":0.0123,"scoreLead":-9.65,"pv":["C17","D16","D12","D13"]},{"move":"C18","winrate":0.0114,"scoreLead":-10.12,"pv":["C18","D12","C17"]}]},{"winrate":0.0331,"scoreLead":-9.67,"topMoves":[{"move":"D13","winrate":0.0331,"scoreLead":-9.68,"pv":["D13","E12","E13","F12","F13"]},{"move":"C14","winrate":0.1792,"scoreLead":-3.17,"pv":["C14"]},{"move":"B14","winrate":0.1782,"scoreLead":-2.7,"pv":["B14"]}]},{"winrate":0.0369,"scoreLead":-9.22,"topMoves":[{"move":"E12","winrate":0.0371,"scoreLead":-9.22,"pv":["E12","E13","F12","F13","B17"]},{"move":"P17","winrate":0.0085,"scoreLead":-13.31,"pv":["P17","E12"]},{"move":"C18","winrate":0.0089,"scoreLead":-14.69,"pv":["C18"]}]},{"winrate":0.0321,"scoreLead":-9.76,"topMoves":[{"move":"E13","winrate":0.0311,"scoreLead":-9.86,"pv":["E13","F12","F13","B17","B14"]},{"move":"E14","winrate":0.0715,"scoreLead":-5.77,"pv":["E14","F11","E13","F13","F14"]},{"move":"F13","winrate":0.1389,"scoreLead":-4.18,"pv":["F13"]}]},{"winrate":0.0321,"scoreLead":-9.83,"topMoves":[{"move":"F12","winrate":0.0321,"scoreLead":-9.84,"pv":["F12","F13","C17","C18","D16"]},{"move":"F11","winrate":0.0083,"scoreLead":-13.27,"pv":["F11","F12"]}]},{"winrate":0.0316,"scoreLead":-9.87,"topMoves":[{"move":"F13","winrate":0.0268,"scoreLead":-10.2,"pv":["F13","B17","B14","B15","C18"]},{"move":"B17","winrate":0.0985,"scoreLead":-5.33,"pv":["B17","F13","E14","F16","G16"]},{"move":"B14","winrate":0.091,"scoreLead":-4.95,"pv":["B14","B15","B17","G16","F13"]}]},{"winrate":0.0267,"scoreLead":-9.91,"topMoves":[{"move":"B17","winrate":0.0249,"scoreLead":-9.8,"pv":["B17","B14","B15","C18","G16"]},{"move":"C18","winrate":0.0278,"scoreLead":-10.82,"pv":["C18","B15","B14","B17","A15"]},{"move":"C14","winrate":0.0302,"scoreLead":-9.7,"pv":["C14","C13","C18","B15","B14"]}]},{"winrate":0.0408,"scoreLead":-9.29,"topMoves":[{"move":"B15","winrate":0.0371,"scoreLead":-9.52,"pv":["B15","B14","B17","A15","C17"]},{"move":"B17","winrate":0.1284,"scoreLead":-3.92,"pv":["B17","C17","D16","B18","B15"]},{"move":"G12","winrate":0.087,"scoreLead":-6.12,"pv":["G12","F11","B15","C17"]}]},{"winrate":0.2072,"scoreLead":-2.65,"topMoves":[{"move":"B14","winrate":0.2197,"scoreLead":-2.42,"pv":["B14","F10","G12","H14","J12"]},{"move":"C17","winrate":0.1144,"scoreLead":-4.15,"pv":["C17","D16","B14","F10","G12"]},{"move":"F11","winrate":0.0898,"scoreLead":-5.3,"pv":["F11","B15","B14","B17","A15"]}]},{"winrate":0.1312,"scoreLead":-5.21,"topMoves":[{"move":"B15","winrate":0.1203,"scoreLead":-5.51,"pv":["B15","B14","B17","A15","C17"]},{"move":"B17","winrate":0.2556,"scoreLead":-2.02,"pv":["B17","C17","D16","B18","B15"]},{"move":"F9","winrate":0.1907,"scoreLead":-2.62,"pv":["F9","B14","H13","H11","F15"]}]},{"winrate":0.2253,"scoreLead":-2.22,"topMoves":[{"move":"B14","winrate":0.232,"scoreLead":-2.13,"pv":["B14","H13","H11","H9","F15"]},{"move":"C17","winrate":0.1252,"scoreLead":-3.52,"pv":["C17","D16","B14","E15","H12"]},{"move":"B17","winrate":0.0712,"scoreLead":-4.88,"pv":["B17"]}]},{"winrate":0.1134,"scoreLead":-5.84,"topMoves":[{"move":"B15","winrate":0.0947,"scoreLead":-6.76,"pv":["B15","B14","B17","A15","C17"]},{"move":"B17","winrate":0.1775,"scoreLead":-2.68,"pv":["B17","C17","D16","B18","B15"]},{"move":"H13","winrate":0.1922,"scoreLead":-2.54,"pv":["H13","B14","J13","G9","F15"]}]},{"winrate":0.1986,"scoreLead":-2.53,"topMoves":[{"move":"B14","winrate":0.2069,"scoreLead":-2.38,"pv":["B14","H13","J12","K12","K11"]},{"move":"C17","winrate":0.1469,"scoreLead":-3.38,"pv":["C17","H13","G16","D16","F16"]},{"move":"F15","winrate":0.1671,"scoreLead":-3.48,"pv":["F15","B17","C17","D16","B18"]}]},{"winrate":0.1776,"scoreLead":-2.81,"topMoves":[{"move":"H14","winrate":0.1658,"scoreLead":-2.99,"pv":["H14","B14","G13","H11","G15"]},{"move":"B17","winrate":0.1866,"scoreLead":-2.64,"pv":["B17","C17","D16","B18","B15"]},{"move":"G14","winrate":0.2329,"scoreLead":-2.36,"pv":["G14","H14","B15","B14","B17"]}]},{"winrate":0.1643,"scoreLead":-3.0,"topMoves":[{"move":"B14","winrate":0.1699,"scoreLead":-2.9,"pv":["B14","G13","H11","G15","G9"]},{"move":"C17","winrate":0.1069,"scoreLead":-4.0,"pv":["C17","D16","B14","G14","F15"]},{"move":"B17","winrate":0.0579,"scoreLead":-5.61,"pv":["B17","B14"]}]},{"winrate":0.0895,"scoreLead":-5.62,"topMoves":[{"move":"G14","winrate":0.0796,"scoreLead":-5.91,"pv":["G14","B14","K14","J15","K15"]},{"move":"G13","winrate":0.1602,"scoreLead":-3.68,"pv":["G13","H11","B15","B14","B17"]},{"move":"B17","winrate":0.1785,"scoreLead":-2.98,"pv":["B17","C17","D16","B18","B15"]}]},{"winrate":0.2922,"scoreLead":-1.74,"topMoves":[{"move":"G14","winrate":0.3127,"scoreLead":-1.38,"pv":["G14","B14","B15","J15","G13"]},{"move":"J15","winrate":0.112,"scoreLead":-5.0,"pv":["J15","G14","K15","B15","C17"]},{"move":"C14","winrate":0.0991,"scoreLead":-5.08,"pv":["C14","C13"]}]},{"winrate":0.0895,"scoreLead":-5.66,"topMoves":[{"move":"G14","winrate":0.0823,"scoreLead":-5.87,"pv":["G14","F16","G16","G17","G18"]},{"move":"H15","winrate":0.161,"scoreLead":-3.45,"pv":["H15","J16","H16","B14","K13"]},{"move":"B17","winrate":0.2219,"scoreLead":-2.32,"pv":["B17","C17","D16","B18","B15"]}]},{"winrate":0.2026,"scoreLead":-3.1,"topMoves":[{"move":"H16","winrate":0.2219,"scoreLead":-2.84,"pv":["H16","F15","K15","B15","F16"]},{"move":"J16","winrate":0.1593,"scoreLead":-3.5,"pv":["J16","F15","C17","D16","B14"]},{"move":"K15","winrate":0.1606,"scoreLead":-4.1,"pv":["K15","B15","B14","B17","A15"]}]},{"winrate":0.1472,"scoreLead":-5.08,"topMoves":[{"move":"B15","winrate":0.1352,"scoreLead":-5.63,"pv":["B15","B14","B17","A15","C17"]},{"move":"G13","winrate":0.1427,"scoreLead":-4.38,"pv":["G13","H11","B15","C17","D16"]},{"move":"B17","winrate":0.2962,"scoreLead":-1.76,"pv":["B17","C17","D16","B18","B15"]}]},{"winrate":0.2895,"scoreLead":-1.89,"topMoves":[{"move":"C17","winrate":0.2834,"scoreLead":-1.78,"pv":["C17","D16","K13","J12","J11"]},{"move":"B14","winrate":0.2992,"scoreLead":-1.89,"pv":["B14","K13","L15","H11","J12"]},{"move":"H16","winrate":0.1937,"scoreLead":-3.22,"pv":["H16","B15","F16","G16","G17"]}]},{"winrate":0.0445,"scoreLead":-10.33,"topMoves":[{"move":"C17","winrate":0.0349,"scoreLead":-10.71,"pv":["C17","B17","A18","B18","A15"]},{"move":"B15","winrate":0.2216,"scoreLead":-2.38,"pv":["B15","C17","B14","A17","L4"]},{"move":"A15","winrate":0.3204,"scoreLead":-1.5,"pv":["A15","C17","D16","B14","A14"]}]},{"winrate":0.3216,"scoreLead":-1.35,"topMoves":[{"move":"C17","winrate":0.3238,"scoreLead":-1.31,"pv":["C17","B14","A17","D18","B18"]},{"move":"C14","winrate":0.0598,"scoreLead":-6.03,"pv":["C14"]},{"move":"H16","winrate":0.0351,"scoreLead":-7.9,"pv":["H16"]}]},{"winrate":0.308,"scoreLead":-1.38,"topMoves":[{"move":"B14","winrate":0.3049,"scoreLead":-1.34,"pv":["B14","A17","K5","S5","S6"]},{"move":"D16","winrate":0.3363,"scoreLead":-1.31,"pv":["D16","A17","A15","B14","A14"]},{"move":"A16","winrate":0.326,"scoreLead":-2.73,"pv":["A16","D16","B14","A17","B18"]}]},{"winrate":0.3074,"scoreLead":-1.25,"topMoves":[{"move":"A17","winrate":0.3103,"scoreLead":-1.21,"pv":["A17","K5","S5","S6","S4"]},{"move":"A16","winrate":0.0874,"scoreLead":-4.48,"pv":["A16","D16"]},{"move":"G17","winrate":0.1022,"scoreLead":-4.12,"pv":["G17"]}]},{"winrate":0.2975,"scoreLead":-1.27,"topMoves":[{"move":"K5","winrate":0.285,"scoreLead":-1.27,"pv":["K5","S5","S6","S4","N12"]},{"move":"L4","winrate":0.3216,"scoreLead":-1.28,"pv":["L4","K4","L3","K5","K2"]},{"move":"M12","winrate":0.2896,"scoreLead":-1.31,"pv":["M12","K11","K12","L11"]}]},{"winrate":0.3062,"scoreLead":-1.22,"topMoves":[{"move":"B18","winrate":0.304,"scoreLead":-1.23,"pv":["B18","K12","K11","L11","J12"]},{"move":"H16","winrate":0.3307,"scoreLead":-1.07,"pv":["H16","G16","B18","L4","K4"]},{"move":"G17","winrate":0.1879,"scoreLead":-2.54,"pv":["G17","H17"]}]},{"winrate":0.298,"scoreLead":-1.3,"topMoves":[{"move":"K5","winrate":0.2978,"scoreLead":-1.13,"pv":["K5","S5","S6","S4","N12"]},{"move":"K12","winrate":0.2768,"scoreLead":-1.5,"pv":["K12","G9","K10","F10","D7"]},{"move":"L4","winrate":0.3196,"scoreLead":-1.26,"pv":["L4","K4","L3","K5","K2"]}]},{"winrate":0.3254,"scoreLead":-0.99,"topMoves":[{"move":"J3","winrate":0.3318,"scoreLead":-0.93,"pv":["J3","N7","H4","H2","D7"]},{"move":"H9","winrate":0.3185,"scoreLead":-1.11,"pv":["H9","K5","J4","M4","J5"]},{"move":"G9","winrate":0.3232,"scoreLead":-1.12,"pv":["G9","L4","K4","L3","L2"]}]},{"winrate":0.263,"scoreLead":-1.62,"topMoves":[{"move":"K12","winrate":0.2544,"scoreLead":-1.67,"pv":["K12","K11","L11","J12","K10"]},{"move":"L4","winrate":0.261,"scoreLead":-1.76,"pv":["L4","K4","L3","K5","K2"]},{"move":"K5","winrate":0.2519,"scoreLead":-1.62,"pv":["K5","H9","M4","M3","N3"]}]},{"winrate":0.3288,"scoreLead":-0.92,"topMoves":[{"move":"G9","winrate":0.3469,"scoreLead":-0.87,"pv":["G9","K5","G8","D7","J4"]},{"move":"J3","winrate":0.3302,"scoreLead":-0.86,"pv":["J3","N7","H4","H2","F4"]},{"move":"H9","winrate":0.3268,"scoreLead":-0.97,"pv":["H9","K5","J4","N7","M4"]}]},{"winrate":0.3115,"scoreLead":-1.08,"topMoves":[{"move":"K5","winrate":0.2983,"scoreLead":-1.17,"pv":["K5","H9","M4","M3","N3"]},{"move":"T5","winrate":0.3256,"scoreLead":-0.81,"pv":["T5","J3","J5","H2","H4"]},{"move":"L4","winrate":0.3448,"scoreLead":-1.0,"pv":["L4","K4","L3","K5","K2"]}]},{"winrate":0.3465,"scoreLead":-0.76,"topMoves":[{"move":"H9","winrate":0.354,"scoreLead":-0.73,"pv":["H9","K5","J4","J6","H4"]},{"move":"J3","winrate":0.3486,"scoreLead":-0.71,"pv":["J3","J5","H2","H4","L5"]},{"move":"G9","winrate":0.356,"scoreLead":-0.81,"pv":["G9","G8","H8","G10","H9"]}]},{"winrate":0.2177,"scoreLead":-1.96,"topMoves":[{"move":"L4","winrate":0.2125,"scoreLead":-2.11,"pv":["L4","K4","L3","L2","M2"]},{"move":"L3","winrate":0.2225,"scoreLead":-1.98,"pv":["L3","L4","L2","J3","M4"]},{"move":"H10","winrate":0.2206,"scoreLead":-1.78,"pv":["H10","J12","L4","K4","L3"]}]},{"winrate":0.332,"scoreLead":-0.73,"topMoves":[{"move":"J3","winrate":0.3367,"scoreLead":-0.7,"pv":["J3","K6","H2","H4","K5"]},{"move":"K5","winrate":0.2729,"scoreLead":-1.12,"pv":["K5","N7","S17","S18","S16"]},{"move":"O17","winrate":0.2615,"scoreLead":-1.21,"pv":["O17","S16","S15","N17","P18"]}]},{"winrate":0.2199,"scoreLead":-1.77,"topMoves":[{"move":"K5","winrate":0.2066,"scoreLead":-1.74,"pv":["K5","H9","M4","M3","N3"]},{"move":"L4","winrate":0.2189,"scoreLead":-2.0,"pv":["L4","K4","L3","L2","M2"]},{"move":"L3","winrate":0.2422,"scoreLead":-1.73,"pv":["L3","L4","L2","J3","M4"]}]},{"winrate":0.2688,"scoreLead":-1.14,"topMoves":[{"move":"J3","winrate":0.2741,"scoreLead":-1.1,"pv":["J3","K6","H4","H2","J5"]},{"move":"K5","winrate":0.2238,"scoreLead":-1.51,"pv":["K5","S16","S15","S17","H9"]},{"move":"H17","winrate":0.2178,"scoreLead":-1.53,"pv":["H17","G17","J3","H4"]}]},{"winrate":0.0866,"scoreLead":-4.0,"topMoves":[{"move":"J10","winrate":0.0787,"scoreLead":-3.83,"pv":["J10","K11","L3","L4","L2"]},{"move":"H10","winrate":0.0805,"scoreLead":-4.14,"pv":["H10","J12","L3","L4","L2"]},{"move":"L3","winrate":0.0978,"scoreLead":-4.08,"pv":["L3","L4","L2","K2","K4"]}]},{"winrate":0.1872,"scoreLead":-3.1,"topMoves":[{"move":"L4","winrate":0.1985,"scoreLead":-3.05,"pv":["L4","K5","J3","L3","L2"]},{"move":"L3","winrate":0.0784,"scoreLead":-3.42,"pv":["L3","L4","M4","M3","M2"]},{"move":"J3","winrate":0.063,"scoreLead":-4.2,"pv":["J3","J4","L4"]}]},{"winrate":0.1955,"scoreLead":-3.41,"topMoves":[{"move":"L3","winrate":0.1955,"scoreLead":-3.53,"pv":["L3","J4","K5","J3","M3"]},{"move":"K5","winrate":0.1869,"scoreLead":-2.22,"pv":["K5","J3","L3","M4","M3"]},{"move":"H10","winrate":0.2012,"scoreLead":-3.04,"pv":["H10","J12","L3","J4","K5"]}]},{"winrate":0.2349,"scoreLead":-1.24,"topMoves":[{"move":"L3","winrate":0.24,"scoreLead":-1.17,"pv":["L3","H10","J12","S16","S15"]},{"move":"S17","winrate":0.2115,"scoreLead":-1.51,"pv":["S17","S18","S16","L3","M3"]},{"move":"H17","winrate":0.2182,"scoreLead":-1.44,"pv":["H17","G17","S17","S18","S16"]}]},{"winrate":0.2352,"scoreLead":-1.22,"topMoves":[{"move":"H10","winrate":0.2285,"scoreLead":-1.25,"pv":["H10","J12","S16","S15","S17"]},{"move":"S16","winrate":0.2362,"scoreLead":-1.23,"pv":["S16","S15","H10","J12","S17"]},{"move":"J10","winrate":0.2348,"scoreLead":-1.2,"pv":["J10","K11","S16","S15","S17"]}]},{"winrate":0.3129,"scoreLead":-0.77,"topMoves":[{"move":"S17","winrate":0.3234,"scoreLead":-0.72,"pv":["S17","S18","S16","N17","K11"]},{"move":"H10","winrate":0.2941,"scoreLead":-0.83,"pv":["H10","H9","S17","S18","S16"]},{"move":"H17","winrate":0.2727,"scoreLead":-0.94,"pv":["H17","G17","S17","S18","S16"]}]},{"winrate":0.2519,"scoreLead":-0.99,"topMoves":[{"move":"S16","winrate":0.247,"scoreLead":-1.02,"pv":["S16","S15","S17","K6","S14"]},{"move":"L5","winrate":0.2851,"scoreLead":-0.8,"pv":["L5","M5","L6","S17","S18"]},{"move":"K6","winrate":0.3046,"scoreLead":-0.56,"pv":["K6","S17","S18","S16","M18"]}]},{"winrate":0.2787,"scoreLead":-0.85,"topMoves":[{"move":"M5","winrate":0.2795,"scoreLead":-0.84,"pv":["M5","L6","S17","S18","S16"]},{"move":"O17","winrate":0.2323,"scoreLead":-1.18,"pv":["O17","P17","N18","S16","S15"]},{"move":"P18","winrate":0.2577,"scoreLead":-1.14,"pv":["P18","P17","O17","N18","S17"]}]},{"winrate":0.1129,"scoreLead":-3.52,"topMoves":[{"move":"M5","winrate":0.1018,"scoreLead":-3.91,"pv":["M5","K5","N5","N4","L7"]},{"move":"N5","winrate":0.1073,"scoreLead":-3.41,"pv":["N5","N4","K8","K5","L6"]},{"move":"K5","winrate":0.2059,"scoreLead":-1.36,"pv":["K5","M5","L6","S17","S18"]}]},{"winrate":0.2188,"scoreLead":-1.31,"topMoves":[{"move":"M5","winrate":0.2204,"scoreLead":-1.3,"pv":["M5","L6","S17","S18","S16"]},{"move":"O17","winrate":0.1707,"scoreLead":-1.83,"pv":["O17","P17","N18","S16","S15"]},{"move":"H17","winrate":0.1705,"scoreLead":-1.69,"pv":["H17","G17","M5","L6","S17"]}]},{"winrate":0.101,"scoreLead":-3.67,"topMoves":[{"move":"M5","winrate":0.0899,"scoreLead":-3.73,"pv":["M5","O17","N3","N2","O3"]},{"move":"S16","winrate":0.1232,"scoreLead":-2.22,"pv":["S16","S15","S17","M5","L6"]},{"move":"N5","winrate":0.1171,"scoreLead":-6.14,"pv":["N5","M5","M4","M6","M3"]}]},{"winrate":0.1018,"scoreLead":-3.59,"topMoves":[{"move":"S17","winrate":0.1078,"scoreLead":-3.68,"pv":["S17","S18","S16","N3","N2"]},{"move":"O17","winrate":0.0868,"scoreLead":-3.25,"pv":["O17","N3","N2","O3","N4"]},{"move":"H17","winrate":0.0811,"scoreLead":-3.91,"pv":["H17","N3","N2","O3","O2"]}]},{"winrate":0.039,"scoreLead":-4.77,"topMoves":[{"move":"K9","winrate":0.0361,"scoreLead":-4.81,"pv":["K9","L8","L9","M8","S16"]},{"move":"S16","winrate":0.0338,"scoreLead":-4.65,"pv":["S16","S15","S17","K9","S14"]},{"move":"L10","winrate":0.0423,"scoreLead":-5.06,"pv":["L10","G9","G10","H10","H9"]}]},{"winrate":0.0945,"scoreLead":-3.1,"topMoves":[{"move":"N4","winrate":0.0954,"scoreLead":-3.06,"pv":["N4","S16","S15","S17","K9"]},{"move":"N2","winrate":0.0208,"scoreLead":-6.7,"pv":["N2","O3","N4"]},{"move":"M4","winrate":0.0101,"scoreLead":-15.17,"pv":["M4"]}]},{"winrate":0.0221,"scoreLead":-6.28,"topMoves":[{"move":"K9","winrate":0.0184,"scoreLead":-6.38,"pv":["K9","G9","G10","H10","H9"]},{"move":"L10","winrate":0.0213,"scoreLead":-6.66,"pv":["L10","G9","G10","H10","H9"]},{"move":"S16","winrate":0.0213,"scoreLead":-5.68,"pv":["S16","S15","S17","K9","N12"]}]},{"winrate":0.0685,"scoreLead":-3.52,"topMoves":[{"move":"O2","winrate":0.0687,"scoreLead":-3.51,"pv":["O2","S17","G9","G10","H10"]},{"move":"C14","winrate":0.0265,"scoreLead":-6.68,"pv":["C14","C13"]},{"move":"N5","winrate":0.0114,"scoreLead":-16.99,"pv":["N5"]}]},{"winrate":0.0633,"scoreLead":-3.77,"topMoves":[{"move":"K9","winrate":0.0718,"scoreLead":-3.12,"pv":["K9","S17","S18","S16","L8"]},{"move":"S16","winrate":0.0543,"scoreLead":-4.17,"pv":["S16","S15","S17","G9","G10"]},{"move":"L10","winrate":0.0833,"scoreLead":-3.05,"pv":["L10","S17","S18","S16","H10"]}]},{"winrate":0.052,"scoreLead":-4.27,"topMoves":[{"move":"S15","winrate":0.0524,"scoreLead":-4.27,"pv":["S15","S17","O11","K9","L8"]},{"move":"C14","winrate":0.0372,"scoreLead":-4.26,"pv":["C14","C13","S15","S17","G9"]},{"move":"P17","winrate":0.0294,"scoreLead":-5.03,"pv":["P17","P18","S15"]}]},{"winrate":0.0492,"scoreLead":-4.45,"topMoves":[{"move":"S17","winrate":0.0474,"scoreLead":-4.52,"pv":["S17","O11","K9","L8","L9"]},{"move":"H11","winrate":0.0981,"scoreLead":-3.01,"pv":["H11","H10","J11","J10","G11"]},{"move":"K9","winrate":0.1193,"scoreLead":-2.2,"pv":["K9","S17","S18","T16","L8"]}]},{"winrate":0.0438,"scoreLead":-4.46,"topMoves":[{"move":"H7","winrate":0.0438,"scoreLead":-4.26,"pv":["H7","J8","J7","L10","G9"]},{"move":"G9","winrate":0.0492,"scoreLead":-5.03,"pv":["G9","G10","H10","G8","H9"]},{"move":"K9","winrate":0.0329,"scoreLead":-3.86,"pv":["K9","S14","R14","T15","E8"]}]},{"winrate":0.0698,"scoreLead":-3.7,"topMoves":[{"move":"E7","winrate":0.0663,"scoreLead":-3.7,"pv":["E7","F7","E8","H7","H10"]},{"move":"H10","winrate":0.0822,"scoreLead":-4.43,"pv":["H10","F7","J12","G10","H11"]},{"move":"F7","winrate":0.0906,"scoreLead":-2.4,"pv":["F7","K9","N12","E7","F6"]}]},{"winrate":0.0655,"scoreLead":-3.64,"topMoves":[{"move":"F7","winrate":0.0711,"scoreLead":-3.56,"pv":["F7","E8","H7","S14","R14"]},{"move":"H7","winrate":0.0447,"scoreLead":-4.39,"pv":["H7","J8","J7","K10","F7"]},{"move":"K9","winrate":0.0414,"scoreLead":-3.33,"pv":["K9","N12","F7","E6","H7"]}]},{"winrate":0.0174,"scoreLead":-6.3,"topMoves":[{"move":"K10","winrate":0.0148,"scoreLead":-5.79,"pv":["K10","L10","J11","J12","L11"]},{"move":"L10","winrate":0.0179,"scoreLead":-6.77,"pv":["L10","F7","H10","E8","G12"]},{"move":"K9","winrate":0.0151,"scoreLead":-5.9,"pv":["K9","F7","H10","E8","G12"]}]},{"winrate":0.0303,"scoreLead":-4.71,"topMoves":[{"move":"F7","winrate":0.033,"scoreLead":-4.61,"pv":["F7","E6","H7","H10","K9"]},{"move":"H7","winrate":0.0264,"scoreLead":-4.9,"pv":["H7","J8","J7","L10","F7"]},{"move":"H17","winrate":0.0224,"scoreLead":-4.96,"pv":["H17","G17","F7","E6","H7"]}]},{"winrate":0.0259,"scoreLead":-4.9,"topMoves":[{"move":"J17","winrate":0.0224,"scoreLead":-4.86,"pv":["J17","J18","H16","K17","J16"]},{"move":"G17","winrate":0.023,"scoreLead":-5.12,"pv":["G17","F7","E6","G9","G10"]},{"move":"K9","winrate":0.0221,"scoreLead":-5.06,"pv":["K9","F7","E6","G9"]}]},{"winrate":0.0393,"scoreLead":-4.64,"topMoves":[{"move":"F7","winrate":0.0424,"scoreLead":-4.48,"pv":["F7","E6","H7","H10","K9"]},{"move":"H7","winrate":0.03,"scoreLead":-5.2,"pv":["H7","J8","J7","K10","F7"]},{"move":"K9","winrate":0.0118,"scoreLead":-5.27,"pv":["K9","H7","N18"]}]},{"winrate":0.0355,"scoreLead":-4.56,"topMoves":[{"move":"E6","winrate":0.0303,"scoreLead":-4.73,"pv":["E6","H7","J8","J7","K10"]},{"move":"E8","winrate":0.0336,"scoreLead":-4.42,"pv":["E8","H7","L10","G9","G10"]},{"move":"H11","winrate":0.0381,"scoreLead":-4.08,"pv":["H11","H10","G10","G11","H9"]}]},{"winrate":0.035,"scoreLead":-4.56,"topMoves":[{"move":"H7","winrate":0.0374,"scoreLead":-4.41,"pv":["H7","J8","J7","L10","K9"]},{"move":"G9","winrate":0.0296,"scoreLead":-5.04,"pv":["G9","G10","H10","G8","H9"]},{"move":"K9","winrate":0.0134,"scoreLead":-4.94,"pv":["K9","H7","H8","J8"]}]},{"winrate":0.0388,"scoreLead":-4.15,"topMoves":[{"move":"K10","winrate":0.032,"scoreLead":-4.18,"pv":["K10","L10","J8","J7","J11"]},{"move":"L10","winrate":0.0461,"scoreLead":-4.5,"pv":["L10","G9","G8","H8","G10"]},{"move":"J8","winrate":0.0348,"scoreLead":-4.51,"pv":["J8","J7","L10","K9","J11"]}]},{"winrate":0.0816,"scoreLead":-2.46,"topMoves":[{"move":"K9","winrate":0.0839,"scoreLead":-2.41,"pv":["K9","M12","H2","J10","K10"]},{"move":"J8","winrate":0.0492,"scoreLead":-2.94,"pv":["J8","H9","K9","M12","H2"]},{"move":"G7","winrate":0.026,"scoreLead":-4.77,"pv":["G7","K10"]}]},{"winrate":0.0138,"scoreLead":-5.79,"topMoves":[{"move":"L10","winrate":0.0123,"scoreLead":-5.95,"pv":["L10","M7","J7","G8","G9"]},{"move":"L11","winrate":0.013,"scoreLead":-6.24,"pv":["L11","K12","K10","M7","J7"]},{"move":"K10","winrate":0.015,"scoreLead":-5.29,"pv":["K10","M7","L10","L11","M11"]}]},{"winrate":0.0233,"scoreLead":-4.35,"topMoves":[{"move":"L8","winrate":0.0252,"scoreLead":-3.99,"pv":["L8","L10","N9","J7","G8"]},{"move":"G8","winrate":0.0188,"scoreLead":-4.65,"pv":["G8","G9","L8","L11","K12"]},{"move":"J8","winrate":0.0163,"scoreLead":-8.54,"pv":["J8","L8","G8","H9","G9"]}]},{"winrate":0.0249,"scoreLead":-4.09,"topMoves":[{"move":"M10","winrate":0.0209,"scoreLead":-4.41,"pv":["M10","N9","M12","L9"]},{"move":"L11","winrate":0.0225,"scoreLead":-4.1,"pv":["L11","K12","L9","M8","J7"]},{"move":"L10","winrate":0.0225,"scoreLead":-4.0,"pv":["L10","N9","J7","G8","G9"]}]},{"winrate":0.0343,"scoreLead":-3.88,"topMoves":[{"move":"M8","winrate":0.0372,"scoreLead":-3.81,"pv":["M8","H11","H10","J11","J12"]},{"move":"G8","winrate":0.0243,"scoreLead":-3.56,"pv":["G8","G9","M8","K17","L17"]},{"move":"J8","winrate":0.0266,"scoreLead":-6.28,"pv":["J8","M8","G8","H9","G9"]}]},{"winrate":0.0307,"scoreLead":-6.43,"topMoves":[{"move":"M8","winrate":0.03,"scoreLead":-8.45,"pv":["M8","M9","M7","G8","G9"]},{"move":"H11","winrate":0.0225,"scoreLead":-5.35,"pv":["H11","H10","J11","J10","J12"]},{"move":"L11","winrate":0.0424,"scoreLead":-6.79,"pv":["L11","L12","M8","G8","H9"]}]},{"winrate":0.0316,"scoreLead":-3.69,"topMoves":[{"move":"M8","winrate":0.0324,"scoreLead":-3.6,"pv":["M8","K17","L17","L18","M17"]},{"move":"M9","winrate":0.0195,"scoreLead":-5.1,"pv":["M9","M8","M7","N8","N9"]},{"move":"C14","winrate":0.0276,"scoreLead":-4.04,"pv":["C14","C13","M8","G7","G6"]}]},{"winrate":0.0325,"scoreLead":-3.73,"topMoves":[{"move":"K17","winrate":0.0299,"scoreLead":-3.46,"pv":["K17","H2","G2","G4","G3"]},{"move":"G7","winrate":0.0303,"scoreLead":-5.6,"pv":["G7","H6","G6","N18","N17"]},{"move":"M12","winrate":0.029,"scoreLead":-3.38,"pv":["M12","K13","K17","H2","G2"]}]},{"winrate":0.0467,"scoreLead":-3.13,"topMoves":[{"move":"L11","winrate":0.0503,"scoreLead":-3.11,"pv":["L11","M12","K12","K17","H2"]},{"move":"K12","winrate":0.036,"scoreLead":-3.17,"pv":["K12","K17","H2","G2","G4"]},{"move":"N12","winrate":0.0295,"scoreLead":-3.39,"pv":["N12","L11","K12","N11","K17"]}]},{"winrate":0.0454,"scoreLead":-3.42,"topMoves":[{"move":"M12","winrate":0.0427,"scoreLead":-3.45,"pv":["M12","K12","K17","H2","M11"]},{"move":"G7","winrate":0.0473,"scoreLead":-4.19,"pv":["G7","H6","M12","K12","G6"]},{"move":"H11","winrate":0.1029,"scoreLead":-2.46,"pv":["H11","J11","M12","K13","M9"]}]},{"winrate":0.0438,"scoreLead":-3.46,"topMoves":[{"move":"K12","winrate":0.0464,"scoreLead":-2.93,"pv":["K12","K17","H2","G2","G4"]},{"move":"N12","winrate":0.0362,"scoreLead":-4.55,"pv":["N12","M11","N11","M10","K12"]},{"move":"K13","winrate":0.0346,"scoreLead":-6.18,"pv":["K13","J12","K12","G11","G10"]}]},{"winrate":0.0317,"scoreLead":-5.17,"topMoves":[{"move":"M11","winrate":0.0287,"scoreLead":-5.35,"pv":["M11","N11","M10","K12","N10"]},{"move":"H11","winrate":0.0946,"scoreLead":-2.62,"pv":["H11","J11","M11","N11","M10"]},{"move":"J11","winrate":0.049,"scoreLead":-2.61,"pv":["J11","J12","M11","N11","N10"]}]},{"winrate":0.0252,"scoreLead":-5.33,"topMoves":[{"move":"K12","winrate":0.0223,"scoreLead":-3.94,"pv":["K12","N11","K17","O8","P8"]},{"move":"N11","winrate":0.0283,"scoreLead":-6.26,"pv":["N11","M10","K12","L14","K13"]},{"move":"K13","winrate":0.0238,"scoreLead":-7.51,"pv":["K13","J12","K12","G11","G10"]}]},{"winrate":0.022,"scoreLead":-4.47,"topMoves":[{"move":"N11","winrate":0.0195,"scoreLead":-4.6,"pv":["N11","K17","P14","L13","P13"]},{"move":"H11","winrate":0.0307,"scoreLead":-4.7,"pv":["H11","G13","N11","G14","G15"]},{"move":"M9","winrate":0.0267,"scoreLead":-3.42,"pv":["M9","K17","G13","H11","N11"]}]},{"winrate":0.0315,"scoreLead":-3.54,"topMoves":[{"move":"M18","winrate":0.0448,"scoreLead":-3.16,"pv":["M18","J17","O17","P17","N18"]},{"move":"H2","winrate":0.0305,"scoreLead":-3.6,"pv":["H2","L14","K13","G13","H11"]},{"move":"K17","winrate":0.0295,"scoreLead":-3.28,"pv":["K17","N11","O13","O6"]}]},{"winrate":0.0266,"scoreLead":-4.15,"topMoves":[{"move":"N10","winrate":0.023,"scoreLead":-4.34,"pv":["N10","J6","K17","L13","M17"]},{"move":"N8","winrate":0.0412,"scoreLead":-3.02,"pv":["N8","N7","N10","J6","K17"]},{"move":"G13","winrate":0.042,"scoreLead":-3.66,"pv":["G13","H11","N10","L13","N8"]}]},{"winrate":0.0266,"scoreLead":-4.47,"topMoves":[{"move":"J6","winrate":0.0258,"scoreLead":-3.78,"pv":["J6","K17","L13","M17"]},{"move":"L13","winrate":0.0386,"scoreLead":-4.88,"pv":["L13","N8","M6","O6","P6"]},{"move":"H2","winrate":0.0269,"scoreLead":-5.12,"pv":["H2","N8","N7","M7","M6"]}]},{"winrate":0.0157,"scoreLead":-9.55,"topMoves":[{"move":"O11","winrate":0.0125,"scoreLead":-11.16,"pv":["O11","O9","M14","L14","P14"]},{"move":"N8","winrate":0.017,"scoreLead":-9.64,"pv":["N8","N7","M7","O9","N9"]},{"move":"O9","winrate":0.0131,"scoreLead":-5.7,"pv":["O9","O8","N9","J6","O11"]}]},{"winrate":0.0162,"scoreLead":-8.91,"topMoves":[{"move":"M6","winrate":0.0118,"scoreLead":-6.85,"pv":["M6","O11","O9","N9","P6"]},{"move":"N7","winrate":0.0188,"scoreLead":-9.75,"pv":["N7","J7","J6","M7","O9"]},{"move":"Q6","winrate":0.022,"scoreLead":-9.5,"pv":["Q6","S10","S11","T10","R6"]}]},{"winrate":0.0161,"scoreLead":-10.54,"topMoves":[{"move":"J7","winrate":0.0121,"scoreLead":-12.86,"pv":["J7","O9","N9","J6","M7"]},{"move":"M7","winrate":0.0368,"scoreLead":-8.31,"pv":["M7","O9","N9","Q6","S10"]},{"move":"O11","winrate":0.014,"scoreLead":-6.01,"pv":["O11","O9","N9","Q6","O13"]}]},{"winrate":0.0162,"scoreLead":-12.35,"topMoves":[{"move":"O9","winrate":0.0139,"scoreLead":-11.87,"pv":["O9","N9","J6","M7","M6"]},{"move":"J6","winrate":0.0143,"scoreLead":-15.44,"pv":["J6","M7","O9","N9","M6"]},{"move":"Q6","winrate":0.0295,"scoreLead":-9.22,"pv":["Q6","S10","S11","T10","R6"]}]},{"winrate":0.0076,"scoreLead":-13.2,"topMoves":[{"move":"N9","winrate":0.0066,"scoreLead":-14.01,"pv":["N9","Q6","S10","S11","T10"]},{"move":"J6","winrate":0.0081,"scoreLead":-12.2,"pv":["J6","S9","S8","S10","O11"]},{"move":"O11","winrate":0.0222,"scoreLead":-7.74,"pv":["O11","N9","M10","J6","K13"]}]},{"winrate":0.0056,"scoreLead":-13.98,"topMoves":[{"move":"J6","winrate":0.0047,"scoreLead":-13.77,"pv":["J6","M7","M6","L7","L6"]},{"move":"O11","winrate":0.0114,"scoreLead":-14.09,"pv":["O11","S10","J6","M7","M6"]},{"move":"S10","winrate":0.0067,"scoreLead":-15.29,"pv":["S10","Q6","P6","O11"]}]},{"winrate":0.0053,"scoreLead":-15.44,"topMoves":[{"move":"N18","winrate":0.0061,"scoreLead":-15.6,"pv":["N18","J6","M7","M6","L7"]},{"move":"N17","winrate":0.0044,"scoreLead":-15.64,"pv":["N17","J6","M7","M6","L7"]},{"move":"P17","winrate":0.0043,"scoreLead":-13.9,"pv":["P17","J6","M7","M6","L7"]}]},{"winrate":0.0049,"scoreLead":-15.35,"topMoves":[{"move":"S9","winrate":0.0042,"scoreLead":-14.41,"pv":["S9","S8","S10","O11","J6"]},{"move":"J6","winrate":0.0043,"scoreLead":-15.14,"pv":["J6","M7","M6","L7","L6"]},{"move":"S10","winrate":0.0055,"scoreLead":-15.65,"pv":["S10","O11","J6","M7","M6"]}]},{"winrate":0.0068,"scoreLead":-15.81,"topMoves":[{"move":"S10","winrate":0.006,"scoreLead":-15.66,"pv":["S10","S11","T10","R6","S6"]},{"move":"O11","winrate":0.0086,"scoreLead":-16.18,"pv":["O11","P10","S10","S11","T10"]},{"move":"P6","winrate":0.0993,"scoreLead":-9.93,"pv":["P6","O6"]}]},{"winrate":0.0043,"scoreLead":-15.68,"topMoves":[{"move":"S11","winrate":0.0058,"scoreLead":-14.91,"pv":["S11","T10","R6","S6","T7"]},{"move":"J6","winrate":0.0038,"scoreLead":-15.8,"pv":["J6","M7","M6","L7","L6"]},{"move":"M7","winrate":0.0031,"scoreLead":-15.99,"pv":["M7","J6","S11","O11","P10"]}]},{"winrate":0.0059,"scoreLead":-15.33,"topMoves":[{"move":"O11","winrate":0.0062,"scoreLead":-15.95,"pv":["O11","P10","T10","R6","S6"]},{"move":"T10","winrate":0.0057,"scoreLead":-14.85,"pv":["T10","R6","S6","T7","T8"]},{"move":"P6","winrate":0.0718,"scoreLead":-8.48,"pv":["P6","O6"]}]},{"winrate":0.0053,"scoreLead":-15.19,"topMoves":[{"move":"J6","winrate":0.0041,"scoreLead":-15.45,"pv":["J6","M7","M6","L7","L6"]},{"move":"R6","winrate":0.0064,"scoreLead":-14.77,"pv":["R6","S6","T7","T8","S8"]},{"move":"O11","winrate":0.0074,"scoreLead":-14.39,"pv":["O11","S8","J6","M7","M6"]}]},{"winrate":0.0048,"scoreLead":-14.99,"topMoves":[{"move":"S6","winrate":0.0047,"scoreLead":-15.0,"pv":["S6","T7","T8","S8","S9"]},{"move":"M14","winrate":0.7052,"scoreLead":5.33,"pv":["M14"]},{"move":"O11","winrate":0.274,"scoreLead":-1.86,"pv":["O11"]}]},{"winrate":0.0039,"scoreLead":-15.25,"topMoves":[{"move":"T7","winrate":0.0052,"scoreLead":-14.45,"pv":["T7","T8","S8","S9","J6"]},{"move":"J6","winrate":0.0036,"scoreLead":-15.84,"pv":["J6","M7","M6","L7","L6"]},{"move":"L13","winrate":0.0033,"scoreLead":-14.73,"pv":["L13","O11","J6","M7","M6"]}]},{"winrate":0.0047,"scoreLead":-15.41,"topMoves":[{"move":"T8","winrate":0.0042,"scoreLead":-15.72,"pv":["T8","S8","S9","T9","O11"]},{"move":"O11","winrate":0.0067,"scoreLead":-13.64,"pv":["O11","P10","T8","S8","S9"]},{"move":"P6","winrate":0.0686,"scoreLead":-7.44,"pv":["P6","O6"]}]},{"winrate":0.0038,"scoreLead":-15.09,"topMoves":[{"move":"S8","winrate":0.0045,"scoreLead":-15.32,"pv":["S8","S9","J6","M7","M6"]},{"move":"J6","winrate":0.0032,"scoreLead":-15.02,"pv":["J6","M7","M6","L7","L6"]},{"move":"O11","winrate":0.0036,"scoreLead":-15.11,"pv":["O11","S8","J6","M7","M6"]}]},{"winrate":0.0049,"scoreLead":-16.07,"topMoves":[{"move":"S9","winrate":0.0041,"scoreLead":-16.15,"pv":["S9","T9","O11","P10","T8"]},{"move":"O11","winrate":0.0061,"scoreLead":-16.11,"pv":["O11","P10","S9","T9","M14"]},{"move":"M14","winrate":0.0135,"scoreLead":-12.78,"pv":["M14","L14","O11","P10","O14"]}]},{"winrate":0.004,"scoreLead":-15.89,"topMoves":[{"move":"L13","winrate":0.0031,"scoreLead":-15.1,"pv":["L13","O11","J6","M7","M6"]},{"move":"T9","winrate":0.0058,"scoreLead":-16.62,"pv":["T9","O11","P10","T8","J6"]},{"move":"J6","winrate":0.003,"scoreLead":-16.27,"pv":["J6","M7","M6","L7","L6"]}]}],"quality":[{"deltaWinrate":-0.0031,"lostWinrate":0.0031,"bestMove":"Q16"},{"deltaWinrate":0.0213,"lostWinrate":0.0213,"bestMove":"D4"},{"deltaWinrate":-0.0073,"lostWinrate":0.0073,"bestMove":"D4"},{"deltaWinrate":-0.0021,"lostWinrate":0.0,"bestMove":"D4"},{"deltaWinrate":0.0022,"lostWinrate":0.0,"bestMove":"C3"},{"deltaWinrate":0.0018,"lostWinrate":0.0018,"bestMove":"E16"},{"deltaWinrate":-0.0008,"lostWinrate":0.0008,"bestMove":"D15"},{"deltaWinrate":-0.0005,"lostWinrate":0.0,"bestMove":"F17"},{"deltaWinrate":-0.0029,"lostWinrate":0.0029,"bestMove":"F3"},{"deltaWinrate":-0.0008,"lostWinrate":0.0,"bestMove":"R5"},{"deltaWinrate":0.0036,"lostWinrate":0.0,"bestMove":"P4"},{"deltaWinrate":-0.0045,"lostWinrate":0.0,"bestMove":"Q9"},{"deltaWinrate":0.0039,"lostWinrate":0.0,"bestMove":"C6"},{"deltaWinrate":-0.0012,"lostWinrate":0.0,"bestMove":"F3"},{"deltaWinrate":-0.0177,"lostWinrate":0.0177,"bestMove":"B4"},{"deltaWinrate":-0.0019,"lostWinrate":0.0,"bestMove":"C3"},{"deltaWinrate":-0.0033,"lostWinrate":0.0033,"bestMove":"B3"},{"deltaWinrate":-0.0017,"lostWinrate":0.0,"bestMove":"C5"},{"deltaWinrate":-0.0018,"lostWinrate":0.0018,"bestMove":"B4"},{"deltaWinrate":0.0084,"lostWinrate":0.0084,"bestMove":"D6"},{"deltaWinrate":-0.0076,"lostWinrate":0.0076,"bestMove":"D3"},{"deltaWinrate":-0.0024,"lostWinrate":0.0,"bestMove":"D6"},{"deltaWinrate":0.0003,"lostWinrate":0.0,"bestMove":"C7"},{"deltaWinrate":0.0148,"lostWinrate":0.0148,"bestMove":"M3"},{"deltaWinrate":-0.0373,"lostWinrate":0.0373,"bestMove":"Q17"},{"deltaWinrate":-0.0025,"lostWinrate":0.0,"bestMove":"Q17"},{"deltaWinrate":-0.0005,"lostWinrate":0.0005,"bestMove":"P16"},{"deltaWinrate":0.0199,"lostWinrate":0.0199,"bestMove":"P17"},{"deltaWinrate":-0.0218,"lostWinrate":0.0218,"bestMove":"K3"},{"deltaWinrate":0.065,"lostWinrate":0.065,"bestMove":"M3"},{"deltaWinrate":-0.0813,"lostWinrate":0.0813,"bestMove":"Q11"},{"deltaWinrate":0.0872,"lostWinrate":0.0872,"bestMove":"Q11"},{"deltaWinrate":-0.1019,"lostWinrate":0.1019,"bestMove":"Q11"},{"deltaWinrate":0.1284,"lostWinrate":0.1284,"bestMove":"Q11"},{"deltaWinrate":-0.151,"lostWinrate":0.151,"bestMove":"Q11"},{"deltaWinrate":0.1716,"lostWinrate":0.1716,"bestMove":"Q11"},{"deltaWinrate":-0.1509,"lostWinrate":0.1509,"bestMove":"Q11"},{"deltaWinrate":0.0017,"lostWinrate":0.0017,"bestMove":"Q11"},{"deltaWinrate":0.0072,"lostWinrate":0.0,"bestMove":"R13"},{"deltaWinrate":0.0039,"lostWinrate":0.0039,"bestMove":"D10"},{"deltaWinrate":-0.0017,"lostWinrate":0.0017,"bestMove":"R13"},{"deltaWinrate":0.0249,"lostWinrate":0.0249,"bestMove":"D10"},{"deltaWinrate":-0.0895,"lostWinrate":0.0895,"bestMove":"E8"},{"deltaWinrate":0.1581,"lostWinrate":0.1581,"bestMove":"S5"},{"deltaWinrate":0.0004,"lostWinrate":0.0,"bestMove":"E8"},{"deltaWinrate":0.0514,"lostWinrate":0.0514,"bestMove":"P8"},{"deltaWinrate":-0.0061,"lostWinrate":0.0061,"bestMove":"E8"},{"deltaWinrate":0.0057,"lostWinrate":0.0057,"bestMove":"E17"},{"deltaWinrate":-0.0908,"lostWinrate":0.0908,"bestMove":"E8"},{"deltaWinrate":0.0884,"lostWinrate":0.0884,"bestMove":"D10"},{"deltaWinrate":-0.0039,"lostWinrate":0.0039,"bestMove":"B16"},{"deltaWinrate":-0.0244,"lostWinrate":0.0,"bestMove":"C10"},{"deltaWinrate":0.025,"lostWinrate":0.0,"bestMove":"C13"},{"deltaWinrate":0.0025,"lostWinrate":0.0025,"bestMove":"B11"},{"deltaWinrate":-0.3237,"lostWinrate":0.3237,"bestMove":"C13"},{"deltaWinrate":-0.0031,"lostWinrate":0.0,"bestMove":"C12"},{"deltaWinrate":-0.0045,"lostWinrate":0.0045,"bestMove":"D10"},{"deltaWinrate":0.0161,"lostWinrate":0.0161,"bestMove":"A12"},{"deltaWinrate":-0.0552,"lostWinrate":0.0552,"bestMove":"B9"},{"deltaWinrate":-0.0163,"lostWinrate":0.0,"bestMove":"D10"},{"deltaWinrate":-0.0187,"lostWinrate":0.0187,"bestMove":"E10"},{"deltaWinrate":0.0014,"lostWinrate":0.0014,"bestMove":"D9"},{"deltaWinrate":-0.0034,"lostWinrate":0.0034,"bestMove":"B9"},{"deltaWinrate":-0.0072,"lostWinrate":0.0,"bestMove":"E11"},{"deltaWinrate":-0.0001,"lostWinrate":0.0001,"bestMove":"D12"},{"deltaWinrate":0.0038,"lostWinrate":0.0038,"bestMove":"D13"},{"deltaWinrate":-0.0048,"lostWinrate":0.0048,"bestMove":"E12"},{"deltaWinrate":0.0,"lostWinrate":0.0,"bestMove":"E13"},{"deltaWinrate":-0.0005,"lostWinrate":0.0005,"bestMove":"F12"},{"deltaWinrate":-0.0049,"lostWinrate":0.0,"bestMove":"F13"},{"deltaWinrate":0.0141,"lostWinrate":0.0,"bestMove":"B17"},{"deltaWinrate":0.1664,"lostWinrate":0.1664,"bestMove":"B15"},{"deltaWinrate":-0.076,"lostWinrate":0.076,"bestMove":"B14"},{"deltaWinrate":0.0941,"lostWinrate":0.0941,"bestMove":"B15"},{"deltaWinrate":-0.1119,"lostWinrate":0.1119,"bestMove":"B14"},{"deltaWinrate":0.0852,"lostWinrate":0.0852,"bestMove":"B15"},{"deltaWinrate":-0.021,"lostWinrate":0.021,"bestMove":"B14"},{"deltaWinrate":-0.0133,"lostWinrate":0.0,"bestMove":"H14"},{"deltaWinrate":-0.0748,"lostWinrate":0.0748,"bestMove":"B14"},{"deltaWinrate":0.2027,"lostWinrate":0.2027,"bestMove":"G14"},{"deltaWinrate":-0.2027,"lostWinrate":0.2027,"bestMove":"G14"},{"deltaWinrate":0.1131,"lostWinrate":0.1131,"bestMove":"G14"},{"deltaWinrate":-0.0554,"lostWinrate":0.0554,"bestMove":"H16"},{"deltaWinrate":0.1423,"lostWinrate":0.1423,"bestMove":"B15"},{"deltaWinrate":-0.245,"lostWinrate":0.245,"bestMove":"C17"},{"deltaWinrate":0.2771,"lostWinrate":0.2771,"bestMove":"C17"},{"deltaWinrate":-0.0136,"lostWinrate":0.0136,"bestMove":"C17"},{"deltaWinrate":-0.0006,"lostWinrate":0.0,"bestMove":"B14"},{"deltaWinrate":-0.0099,"lostWinrate":0.0099,"bestMove":"A17"},{"deltaWinrate":0.0087,"lostWinrate":0.0087,"bestMove":"K5"},{"deltaWinrate":-0.0082,"lostWinrate":0.0082,"bestMove":"B18"},{"deltaWinrate":0.0274,"lostWinrate":0.0274,"bestMove":"K5"},{"deltaWinrate":-0.0624,"lostWinrate":0.0624,"bestMove":"J3"},{"deltaWinrate":0.0658,"lostWinrate":0.0658,"bestMove":"K12"},{"deltaWinrate":-0.0173,"lostWinrate":0.0173,"bestMove":"G9"},{"deltaWinrate":0.035,"lostWinrate":0.035,"bestMove":"K5"},{"deltaWinrate":-0.1288,"lostWinrate":0.1288,"bestMove":"H9"},{"deltaWinrate":0.1143,"lostWinrate":0.1143,"bestMove":"L4"},{"deltaWinrate":-0.1121,"lostWinrate":0.1121,"bestMove":"J3"},{"deltaWinrate":0.0489,"lostWinrate":0.0489,"bestMove":"K5"},{"deltaWinrate":-0.1822,"lostWinrate":0.1822,"bestMove":"J3"},{"deltaWinrate":0.1006,"lostWinrate":0.1006,"bestMove":"J10"},{"deltaWinrate":0.0083,"lostWinrate":0.0,"bestMove":"L4"},{"deltaWinrate":0.0394,"lostWinrate":0.0394,"bestMove":"L3"},{"deltaWinrate":0.0003,"lostWinrate":0.0,"bestMove":"L3"},{"deltaWinrate":0.0777,"lostWinrate":0.0777,"bestMove":"H10"},{"deltaWinrate":-0.061,"lostWinrate":0.061,"bestMove":"S17"},{"deltaWinrate":0.0268,"lostWinrate":0.0268,"bestMove":"S16"},{"deltaWinrate":-0.1658,"lostWinrate":0.1658,"bestMove":"M5"},{"deltaWinrate":0.1059,"lostWinrate":0.1059,"bestMove":"M5"},{"deltaWinrate":-0.1178,"lostWinrate":0.1178,"bestMove":"M5"},{"deltaWinrate":0.0008,"lostWinrate":0.0008,"bestMove":"M5"},{"deltaWinrate":-0.0628,"lostWinrate":0.0628,"bestMove":"S17"},{"deltaWinrate":0.0555,"lostWinrate":0.0555,"bestMove":"K9"},{"deltaWinrate":-0.0724,"lostWinrate":0.0724,"bestMove":"N4"},{"deltaWinrate":0.0464,"lostWinrate":0.0464,"bestMove":"K9"},{"deltaWinrate":-0.0052,"lostWinrate":0.0052,"bestMove":"O2"},{"deltaWinrate":-0.0113,"lostWinrate":0.0,"bestMove":"K9"},{"deltaWinrate":-0.0028,"lostWinrate":0.0028,"bestMove":"S15"},{"deltaWinrate":-0.0054,"lostWinrate":0.0,"bestMove":"S17"},{"deltaWinrate":0.026,"lostWinrate":0.0,"bestMove":"H7"},{"deltaWinrate":-0.0043,"lostWinrate":0.0,"bestMove":"E7"},{"deltaWinrate":-0.0481,"lostWinrate":0.0481,"bestMove":"F7"},{"deltaWinrate":0.0129,"lostWinrate":0.0129,"bestMove":"K10"},{"deltaWinrate":-0.0044,"lostWinrate":0.0044,"bestMove":"F7"},{"deltaWinrate":0.0134,"lostWinrate":0.0134,"bestMove":"J17"},{"deltaWinrate":-0.0038,"lostWinrate":0.0038,"bestMove":"F7"},{"deltaWinrate":-0.0005,"lostWinrate":0.0,"bestMove":"E6"},{"deltaWinrate":0.0038,"lostWinrate":0.0,"bestMove":"H7"},{"deltaWinrate":0.0428,"lostWinrate":0.0428,"bestMove":"K10"},{"deltaWinrate":-0.0678,"lostWinrate":0.0678,"bestMove":"K9"},{"deltaWinrate":0.0095,"lostWinrate":0.0095,"bestMove":"L10"},{"deltaWinrate":0.0016,"lostWinrate":0.0,"bestMove":"L8"},{"deltaWinrate":0.0094,"lostWinrate":0.0094,"bestMove":"M10"},{"deltaWinrate":-0.0036,"lostWinrate":0.0036,"bestMove":"M8"},{"deltaWinrate":0.0009,"lostWinrate":0.0009,"bestMove":"M8"},{"deltaWinrate":0.0009,"lostWinrate":0.0,"bestMove":"M8"},{"deltaWinrate":0.0142,"lostWinrate":0.0142,"bestMove":"K17"},{"deltaWinrate":-0.0013,"lostWinrate":0.0013,"bestMove":"L11"},{"deltaWinrate":-0.0016,"lostWinrate":0.0,"bestMove":"M12"},{"deltaWinrate":-0.0121,"lostWinrate":0.0121,"bestMove":"K12"},{"deltaWinrate":-0.0065,"lostWinrate":0.0,"bestMove":"M11"},{"deltaWinrate":-0.0032,"lostWinrate":0.0032,"bestMove":"K12"},{"deltaWinrate":0.0095,"lostWinrate":0.0095,"bestMove":"N11"},{"deltaWinrate":-0.0049,"lostWinrate":0.0049,"bestMove":"M18"},{"deltaWinrate":0.0,"lostWinrate":0.0,"bestMove":"N10"},{"deltaWinrate":-0.0109,"lostWinrate":0.0109,"bestMove":"J6"},{"deltaWinrate":0.0005,"lostWinrate":0.0005,"bestMove":"O11"},{"deltaWinrate":-0.0001,"lostWinrate":0.0001,"bestMove":"M6"},{"deltaWinrate":0.0001,"lostWinrate":0.0001,"bestMove":"J7"},{"deltaWinrate":-0.0086,"lostWinrate":0.0086,"bestMove":"O9"},{"deltaWinrate":-0.002,"lostWinrate":0.0,"bestMove":"N9"},{"deltaWinrate":-0.0003,"lostWinrate":0.0003,"bestMove":"J6"},{"deltaWinrate":-0.0004,"lostWinrate":0.0,"bestMove":"N18"},{"deltaWinrate":0.0019,"lostWinrate":0.0,"bestMove":"S9"},{"deltaWinrate":-0.0025,"lostWinrate":0.0,"bestMove":"S10"},{"deltaWinrate":0.0016,"lostWinrate":0.0,"bestMove":"S11"},{"deltaWinrate":-0.0006,"lostWinrate":0.0,"bestMove":"O11"},{"deltaWinrate":-0.0005,"lostWinrate":0.0005,"bestMove":"J6"},{"deltaWinrate":-0.0009,"lostWinrate":0.0,"bestMove":"S6"},{"deltaWinrate":0.0008,"lostWinrate":0.0,"bestMove":"T7"},{"deltaWinrate":-0.0009,"lostWinrate":0.0,"bestMove":"T8"},{"deltaWinrate":0.0011,"lostWinrate":0.0,"bestMove":"S8"},{"deltaWinrate":-0.0009,"lostWinrate":0.0,"bestMove":"S9"}],"sgf":"(;GM[1]FF[4]CA[UTF-8]SZ[19]AP[弈客围棋]PB[棋手1]PW[棋手2]DT[2026-11-07]EV[日常记录]GN[弈客棋谱 #14460140];B[pd];W[dc];B[pq];W[dp];B[ce];W[cd];B[de];W[fc];B[di];W[qo];B[op];W[ql];B[cn];W[fq];B[cp];W[cq];B[bq];W[co];B[bp];W[do];B[bo];W[dn];B[cm];W[qc];B[qd];W[pc];B[od];W[nb];B[qj];W[pj];B[qi];W[qk];B[jq];W[cr];B[qp];W[po];B[oo];W[pi];B[qh];W[ph];B[qg];W[hq];B[pm];W[qm];B[ok];W[pk];B[ed];W[ec];B[nm];W[bg];B[bd];W[cj];B[ci];W[bi];B[bh];W[ch];B[bj];W[ah];B[ck];W[dj];B[ej];W[dk];B[bk];W[ei];B[dh];W[dg];B[eh];W[eg];B[fh];W[fg];B[cb];W[ek];B[fi];W[fk];B[hh];W[ig];B[hg];W[hf];B[if];W[jf];B[ie];W[he];B[je];W[fe];B[ke];W[be];B[cc];W[bf];B[ac];W[db];B[bb];W[ro];B[rp];W[sp];B[sq];W[so];B[dd];W[rq];B[rr];W[sr];B[qr];W[jp];B[kp];W[ip];B[kq];W[ik];B[ji];W[ko];B[jn];W[jo];B[jl];W[lo];B[ir];W[mq];B[mr];W[mp];B[nr];W[rd];B[re];W[rc];B[dm];W[em];B[pg];W[nh];B[hc];W[gc];B[fm];W[en];B[hm];W[hl];B[mg];W[jk];B[kl];W[kk];B[il];W[hk];B[ll];W[kh];B[ki];W[lh];B[mh];W[li];B[jh];W[lk];B[mi];W[mj];B[nj];W[ml];B[mm];W[im];B[nl];W[mk];B[nc];W[mb];B[pn];W[rj];B[ri];W[sj];B[qn];W[rn];B[sm];W[sl];B[rl];W[rk])","file":"棋手1-棋手2-164手.sgf"};
+const BS = D.meta.boardSize;
+const GTP = "ABCDEFGHJKLMNOPQRST";
+const NM = D.moves.length;
+const H19 = [[3,3],[9,3],[15,3],[3,9],[9,9],[15,9],[3,15],[9,15],[15,15]];
+const WARN = .10, BAD = .20;
+let cur = NM;
+let trial = null;   // 点选的试下 (sticky)
+let hover = null;   // 悬停预览 (transient); 弈客: 已点选时 hover 不生效
+let sugCache = { n: -1, list: [] };
+const shown = () => hover || trial;
+
+/* 弈客 colorList (chunk18 原样) + 本页自定的损失分档 (他们的 level 由服务端给) */
+const LEVEL_COLORS = ["", "rgba(36, 142, 53,1)", "rgba(36, 142, 53,1)", "rgba(36, 142, 53,1)",
+  "#82AA28", "#DCB41E", "#EB8C00", "#DC5A14", "rgb(220,0,0)", "rgb(145,0,0)"];
+const LEVEL_T = [.01, .03, .05, .08, .12, .17, .23, .32];
+function levelOf(loss) {
+  for (let i = 0; i < LEVEL_T.length; i++) if (loss < LEVEL_T[i]) return i + 1;
+  return 9;
+}
+function levelColor(loss) { return LEVEL_COLORS[levelOf(loss)]; }
+/* 绿色档: colorList 的 1-3 级共用同一个绿 —— 推荐点必须落在这档内, 不能"虽更优但仍差" */
+const GREEN_LV = 3;
+function isGreen(loss) { return levelOf(loss) <= GREEN_LV; }
+
+function sev(l) { return l >= BAD ? "bad" : l >= WARN ? "warn" : "good"; }
+function sevOf(n) { return n > 0 && D.quality[n-1] ? sev(D.quality[n-1].lostWinrate) : null; }
+const wr = i => D.analysis[i] ? D.analysis[i].winrate : .5;
+function fmtScore(sc) {
+  if (sc === null || sc === undefined) return "—";
+  return (sc >= 0 ? "黑+" : "白+") + Math.abs(sc).toFixed(1);
+}
+
+/* ── 坐标 ── */
+function gtp2cr(g) {
+  if (!g || g === "pass") return null;
+  const c = GTP.indexOf(g[0]), n = parseInt(g.slice(1), 10);
+  if (c < 0 || !n) return null;
+  return { c: c, r: BS - n };
+}
+
+/* ── 局面重演 (含提子) ── */
+const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+function group(g, c0, r0, who, visited) {
+  const stack = [[c0, r0]], cells = [];
+  let lib = false;
+  while (stack.length) {
+    const [c, r] = stack.pop(), i = r * BS + c;
+    if (visited[i]) continue;
+    visited[i] = 1; cells.push(i);
+    for (const [dc, dr] of DIRS) {
+      const c2 = c + dc, r2 = r + dr;
+      if (c2 < 0 || r2 < 0 || c2 >= BS || r2 >= BS) continue;
+      const j = r2 * BS + c2;
+      if (g[j] === 0) lib = true;
+      else if (g[j] === who && !visited[j]) stack.push([c2, r2]);
+    }
+  }
+  return { cells: cells, lib: lib };
+}
+function boardAt(n, extra) {
+  const g = new Uint8Array(BS * BS), caps = { B: 0, W: 0 };
+  const labels = new Map();               // 试下手的编号
+  for (const s of D.meta.initialStones) {
+    const p = gtp2cr(s[1]);
+    if (p) g[p.r * BS + p.c] = s[0] === "B" ? 1 : 2;
+  }
+  const seq = extra && extra.length ? D.moves.slice(0, n).concat(extra) : D.moves.slice(0, n);
+  let lastIdx = -1;
+  for (let i = 0; i < seq.length; i++) {
+    const mv = seq[i], p = gtp2cr(mv.gtp);
+    if (!p) continue;
+    if (i >= n) labels.set(p.r * BS + p.c, i - n + 1);
+    const me = mv.color === "B" ? 1 : 2, opp = me === 1 ? 2 : 1;
+    g[p.r * BS + p.c] = me; lastIdx = p.r * BS + p.c;
+    for (const [dc, dr] of DIRS) {
+      const c2 = p.c + dc, r2 = p.r + dr;
+      if (c2 < 0 || r2 < 0 || c2 >= BS || r2 >= BS) continue;
+      if (g[r2 * BS + c2] !== opp) continue;
+      const grp = group(g, c2, r2, opp, new Uint8Array(BS * BS));
+      if (!grp.lib) { grp.cells.forEach(j => g[j] = 0); caps[mv.color] += grp.cells.length; }
+    }
+    const own = group(g, p.c, p.r, me, new Uint8Array(BS * BS));
+    if (!own.lib) own.cells.forEach(j => { g[j] = 0; labels.delete(j); });
+  }
+  return { g: g, caps: caps, lastIdx: lastIdx, labels: labels };
+}
+
+/* 实战手相对最佳的损失 —— 候选的取舍基准.
+   实战手若在候选里, 用同一次搜索的值 (最可比); 否则退回跨搜索的 lostWinrate. */
+function realLoss() {
+  if (cur >= NM) return null;                          // 末局面没有实战手可比
+  const an = D.analysis[cur], tops = (an && an.topMoves) ? an.topMoves : [];
+  if (!tops.length) return null;
+  const isB = nextColor() === "B";
+  const own = w => isB ? w : 1 - w;
+  const hit = tops.find(t => t.move === D.moves[cur].gtp);
+  return hit ? Math.max(0, own(tops[0].winrate) - own(hit.winrate))
+             : D.quality[cur].lostWinrate;
+}
+
+/* ── 当前局面的推荐标记 (绘制与命中测试共用同一份) ── */
+function suggestions() {
+  if (sugCache.n === cur) return sugCache;
+  const an = D.analysis[cur], tops = (an && an.topMoves) ? an.topMoves.slice(0, 4) : [];
+  const base = boardAt(cur), isB = nextColor() === "B";
+  const best = tops.length ? (isB ? tops[0].winrate : 1 - tops[0].winrate) : 0;
+  const rl = realLoss();
+  const all = [];
+  tops.forEach((t, i) => {
+    const own = isB ? t.winrate : 1 - t.winrate;
+    const loss = Math.max(0, best - own);
+    const p = gtp2cr(t.move);
+    // 入选条件: 严格优于实战手 (末局面无实战手则免此条) 且本身是绿色档 (不能太差)
+    const better = (rl === null || loss < rl) && isGreen(loss);
+    all.push({ i: i, move: t.move, own: own, loss: loss, isB: isB, better: better,
+               c: p ? p.c : -1, r: p ? p.r : -1,
+               onBoard: !!p && !base.g[p.r * BS + p.c] && better });
+  });
+  // 实战手也画上 (弈客的 "实战" 概念): 它不在 better 集里, 单独一条
+  let real = null;
+  if (rl !== null) {
+    const mv = D.moves[cur], p = gtp2cr(mv.gtp);
+    if (p && !base.g[p.r * BS + p.c]) {
+      const hit = tops.find(t => t.move === mv.gtp);
+      const post = D.analysis[cur + 1];
+      // 该手的胜率: 在候选里用同一次搜索的值, 否则用落子后的根胜率
+      const own = hit ? (isB ? hit.winrate : 1 - hit.winrate)
+                      : (post ? (isB ? post.winrate : 1 - post.winrate) : null);
+      real = { i: -1, real: true, move: mv.gtp, c: p.c, r: p.r,
+               own: own, loss: rl, isB: isB, onBoard: true };
+    }
+  }
+  sugCache = { n: cur, all: all, board: all.filter(x => x.onBoard),
+               real: real, realLoss: rl };
+  return sugCache;
+}
+
+/* ── 棋盘 ── */
+const cv = document.getElementById("board");
+let geom = { st: 0, mg: 0, px: 0 };
+function sizeBoard() {
+  const dpr = window.devicePixelRatio || 1, css = cv.clientWidth || 440;
+  cv.width = Math.round(css * dpr); cv.height = cv.width;
+  const mg = Math.round(cv.width * 0.042);
+  geom = { st: (cv.width - 2 * mg) / (BS - 1), mg: mg, px: cv.width };
+}
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function drawStone(ctx, x, y, r, black) {
+  const gr = ctx.createRadialGradient(x - r * .35, y - r * .4, r * .1, x, y, r * 1.05);
+  if (black) { gr.addColorStop(0, cssVar("--stone-b-hi")); gr.addColorStop(.5, cssVar("--stone-b")); gr.addColorStop(1, cssVar("--stone-b")); }
+  else { gr.addColorStop(0, "#FFFDF6"); gr.addColorStop(.62, cssVar("--stone-w")); gr.addColorStop(1, cssVar("--stone-w-lo")); }
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = gr; ctx.fill();
+  if (!black) { ctx.strokeStyle = "rgba(90,80,50,.28)"; ctx.lineWidth = Math.max(1, r * .05); ctx.stroke(); }
+}
+function renderBoard() {
+  const ctx = cv.getContext("2d"), { st, mg, px } = geom, r = st * .468;
+  const S = boardAt(cur, shown() ? shown().moves : null);
+  ctx.fillStyle = cssVar("--board"); ctx.fillRect(0, 0, px, px);
+  ctx.strokeStyle = cssVar("--board-line"); ctx.lineWidth = Math.max(1, px / 760);
+  ctx.beginPath();
+  for (let i = 0; i < BS; i++) {
+    const p = mg + i * st;
+    ctx.moveTo(Math.round(p) + .5, mg); ctx.lineTo(Math.round(p) + .5, mg + (BS - 1) * st);
+    ctx.moveTo(mg, Math.round(p) + .5); ctx.lineTo(mg + (BS - 1) * st, Math.round(p) + .5);
+  }
+  ctx.stroke();
+  if (BS === 19) {
+    ctx.fillStyle = cssVar("--board-line");
+    H19.forEach(([c, rr]) => { ctx.beginPath(); ctx.arc(mg + c * st, mg + rr * st, Math.max(1.6, st * .1), 0, Math.PI * 2); ctx.fill(); });
+  }
+  ctx.fillStyle = cssVar("--board-label"); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.font = Math.max(7, Math.round(st * .33)) + "px " + cssVar("--mono");
+  for (let i = 0; i < BS; i++) {
+    ctx.fillText(GTP[i], mg + i * st, mg - st * .64);
+    ctx.fillText(String(BS - i), mg - st * .68, mg + i * st);
+  }
+  for (let i = 0; i < S.g.length; i++) {
+    if (!S.g[i]) continue;
+    const c = i % BS, rr = (i - c) / BS;
+    drawStone(ctx, mg + c * st, mg + rr * st, r, S.g[i] === 1);
+  }
+  // 试下手的编号 (弈客: markerStyle "LB", markerNum 1 起)
+  if (S.labels.size) {
+    ctx.textBaseline = "middle"; ctx.textAlign = "center";
+    S.labels.forEach((num, idx) => {
+      const c = idx % BS, rr = (idx - c) / BS;
+      const txt = String(num);
+      ctx.font = Math.round(txt.length > 1 ? r * 1.2 : r * 1.5) + "px " + cssVar("--mono");
+      // 弈客 markupBlackColor / markupWhiteColor
+      ctx.fillStyle = S.g[idx] === 1 ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.7)";
+      ctx.fillText(txt, mg + c * st, mg + rr * st);
+    });
+  }
+
+  // 末手: 红色向下三角 (弈客 lastMoveColor "red", 几何照搬)
+  if (S.lastIdx >= 0 && !S.labels.size) {
+    const c = S.lastIdx % BS, rr = (S.lastIdx - c) / BS;
+    const x = mg + c * st, y = mg + rr * st;
+    ctx.fillStyle = "#FF0000";
+    ctx.beginPath();
+    ctx.moveTo(x - .5, y + .5 + Math.round(r / 1.2));
+    ctx.lineTo(Math.round(x - r / 1.5) - .5, Math.round(y + r / 2) + .5);
+    ctx.lineTo(Math.round(x + r / 1.5) + .5, Math.round(y + r / 2) + .5);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // 推荐着点: 弈客 YKLBBW —— 色圆 + 胜率数字, 首选带 "1" 角标
+  if (!shown()) {
+    const lw = Math.max(1, r / 8);
+    // 弈客 YKLBBW: 色圆 + 胜率数字.
+    // 实战手不用文字角标 —— 标记圆本就快填满格子, 外挂字会出格;
+    // 改成圆盘内缩 + 常规半径上描一道外圈, 总占位与其他标记一致.
+    const R0 = Math.max(0, r - lw) + 2;             // 常规标记半径 (≈填满格子)
+    // 实战手的外圈: 外沿必须留在格内, 所以按格半距反算, 再把圆盘缩到圈内
+    const ringW = Math.max(1.5, lw * 0.8);
+    const Rring = Math.min(R0, st / 2 - ringW / 2 - 0.4);
+    const Rreal = Math.max(3, Rring - ringW / 2 - Math.max(1, lw * 0.3));
+    const kReal = Rreal / R0;                       // 圆盘缩放比
+    const mono = cssVar("--mono");
+    // 弈客的字号档 (1字 1.5r / 2字 1.2r / 更长 0.75r), scale 用于内缩的圆盘
+    const tier = (t, scale) => Math.round(
+      (t.length > 2 ? 3 * r / 4 : t.length === 2 ? 1.2 * r : 1.5 * r) * scale);
+    // 内缩圆盘里放胜率: 守同一字号档, 实测装不下才退成整数
+    const label = (own, R, scale) => {
+      if (own === null) { ctx.font = Math.round(R) + "px " + mono; return "?"; }
+      const pct = own * 100;
+      for (const t of [pct.toFixed(1), String(Math.round(pct))]) {
+        ctx.font = tier(t, scale) + "px " + mono;
+        if (!ctx.measureText || ctx.measureText(t).width <= 2 * R - 2) return t;
+      }
+      const t = String(Math.round(pct));
+      ctx.font = Math.round(tier(t, scale) * .8) + "px " + mono;
+      return t;
+    };
+    const mark = (sg, kind) => {
+      const x = mg + sg.c * st, y = mg + sg.r * st;
+      const isReal = kind === "real";
+      const R = isReal ? Rreal : R0;
+      ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2, true);
+      ctx.fillStyle = levelColor(sg.loss); ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = sg.isB ? "black" : "white"; ctx.stroke();
+      ctx.fillStyle = "#eeeeee"; ctx.textBaseline = "middle"; ctx.textAlign = "center";
+      let txt;
+      if (isReal) {
+        txt = label(sg.own, R, kReal);                // 同档字号 × 缩放比, 必要时退整数
+      } else {
+        txt = sg.own === null ? "?" : (sg.own * 100).toFixed(1);
+        ctx.font = tier(txt, 1) + "px " + mono;
+      }
+      ctx.fillText(txt, x, y, 2 * R);
+      if (isReal) {                                   // 实战手: 盘外一道圈
+        ctx.beginPath(); ctx.arc(x, y, Rring, 0, Math.PI * 2, true);
+        ctx.lineWidth = ringW;
+        ctx.strokeStyle = sg.isB ? "black" : "white";
+        ctx.stroke();
+      } else if (kind === "top") {                    // 弈客的 main 角标
+        const bx = x + r / 1.4, by = y - r / 1.4, br = Math.max(0, r / 2.3);
+        ctx.fillStyle = sg.isB ? "black" : "white";
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2, true); ctx.fill();
+        ctx.fillStyle = sg.isB ? "white" : "black";
+        ctx.font = Math.round(r) + "px " + cssVar("--mono");
+        ctx.fillText("1", bx, by, 2 * r);
+      }
+    };
+    const sug = suggestions();
+    if (sug.real) mark(sug.real, "real");
+    sug.board.forEach((sg, k) => mark(sg, k === 0 ? "top" : null));
+  }
+  return S;
+}
+
+/* ── 胜率条 + 选手行 ── */
+function renderBar() {
+  const w = wr(cur), b = w * 100, wh = 100 - b;
+  const L = document.getElementById("vsl"), R = document.getElementById("vsr");
+  L.style.width = b.toFixed(1) + "%"; R.style.width = wh.toFixed(1) + "%";
+  L.textContent = b >= 16 ? b.toFixed(1) + "%" : "";
+  R.textContent = wh >= 16 ? wh.toFixed(1) + "%" : "";
+  document.getElementById("bwr").textContent = b.toFixed(1) + "%";
+  document.getElementById("wwr").textContent = wh.toFixed(1) + "%";
+}
+
+/* ── 推荐着点 (弈客行式: 编号棋子 / 坐标 / 实战 / 胜率 / 领先落后) ── */
+function renderRecommend() {
+  const an = D.analysis[cur], host = document.getElementById("rlist");
+  const played = cur < NM ? D.moves[cur].gtp : null;
+  const isB = nextColor() === "B";
+  document.getElementById("rctx").textContent =
+    (cur === 0 ? "开局" : "第 " + cur + " 手后") + " · 轮" + (isB ? "黑" : "白") + "走";
+  const sug = suggestions(), all = sug.all;
+  const nBetter = sug.board.length;
+  document.getElementById("rgap").textContent =
+    sug.realLoss === null
+      ? (nBetter ? "盘上标出 " + nBetter + " 个候选" : "无绿色档候选")
+      : nBetter ? "盘上: 实 + " + nBetter + " 个更优点"
+                : (isGreen(sug.realLoss) ? "盘上: 实战即最佳" : "盘上: 仅实战手 (无绿色档更优点)");
+  if (!all.length) { host.innerHTML = '<div class="none">该局面没有候选数据</div>'; return; }
+  const tops = an.topMoves;
+  host.innerHTML = all.map((sg, i) => {
+    const t = tops[i];
+    const sl = isB ? t.scoreLead : -t.scoreLead;    // 该方视角: 正=领先
+    const ahead = sl >= 0;
+    const on = trial && trial.sel === sg.move ? " on" : "";
+    const dim = sg.better ? "" : " weak";           // 不优于实战 -> 弱化, 与盘面一致
+    return '<div class="rrow' + on + dim + '" data-mv="' + sg.move + '" data-i="' + i + '" role="button" tabindex="0">'
+      + '<span class="chip ' + (isB ? "b" : "w") + '">' + String(i + 1).padStart(2, "0") + '</span>'
+      + '<span class="co">' + sg.move + '</span>'
+      + (played && sg.move === played
+          ? '<span class="shizhan" style="background:' + LEVEL_COLORS[levelOf(sg.loss)] + '">实战</span>' : '')
+      + '<span class="wr">' + (sg.own * 100).toFixed(1) + '%</span>'
+      + '<span class="sl ' + (ahead ? "ahead" : "behind") + '">'
+        + (ahead ? "领先" : "落后") + " " + Math.abs(sl).toFixed(1) + ' 目</span></div>';
+  }).join("");
+  host.querySelectorAll(".rrow").forEach(el => {
+    const mv = el.dataset.mv, i = Number(el.dataset.i);
+    el.addEventListener("click", () => toggleTrial(mv, i));
+    el.addEventListener("mouseenter", () => setHover(mv, i));
+    el.addEventListener("mouseleave", () => setHover(null));
+    el.addEventListener("focus", () => setHover(mv, i));
+    el.addEventListener("blur", () => setHover(null));
+    el.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleTrial(mv, i); }
+    });
+  });
+  markRows();
+}
+
+/* ── 盘上命中测试: 鼠标移到推荐标记上就预览后续手顺 ── */
+function hitSuggestion(e) {
+  const b = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  const scale = cv.width / b.width;                    // CSS 像素 -> canvas 像素
+  const x = (t.clientX - b.left) * scale, y = (t.clientY - b.top) * scale;
+  const { st, mg } = geom, rad = st * .468 + 2;
+  const sug = suggestions();
+  for (const sg of sug.board.concat(sug.real ? [sug.real] : [])) {
+    const dx = x - (mg + sg.c * st), dy = y - (mg + sg.r * st);
+    if (dx * dx + dy * dy <= rad * rad) return sg;
+  }
+  return null;
+}
+cv.addEventListener("mousemove", e => {
+  const sg = hitSuggestion(e);
+  cv.style.cursor = sg ? "pointer" : "default";
+  if (!trial) setHover(sg ? sg.move : null, sg ? sg.i : 0);
+});
+cv.addEventListener("mouseleave", () => { cv.style.cursor = "default"; setHover(null); });
+cv.addEventListener("click", e => {                    // 触屏/点按也能钉住
+  const sg = hitSuggestion(e);
+  if (sg) { hover = null; toggleTrial(sg.move, sg.i); }
+});
+
+/* ── 试下 / 悬停预览 (弈客 recommendStoneTop / hoverActive) ── */
+function buildTrial(mv, i) {
+  if (i === -1) {                                      // 实战手 -> 摆真实的后续进行
+    const n = Math.min(6, NM - cur);
+    if (n <= 0) return null;
+    return { sel: mv, real: true,
+             moves: D.moves.slice(cur, cur + n).map(m => ({ color: m.color, gtp: m.gtp })) };
+  }
+  const an = D.analysis[cur];
+  const t = an && an.topMoves ? an.topMoves[i] : null;
+  if (!t) return null;
+  const pv = (t.pv && t.pv.length) ? t.pv : [t.move];
+  let col = nextColor();
+  return { sel: mv, moves: pv.map(g => { const m = { color: col, gtp: g }; col = col === "B" ? "W" : "B"; return m; }) };
+}
+function syncBar() {
+  const a = shown(), bar = document.getElementById("tbar");
+  if (!a) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.classList.toggle("preview", !trial);
+  document.getElementById("tinfo").innerHTML =
+    (a.real ? (trial ? "实战进行 <b>" : "实战进行 <b>") : (trial ? "试下 <b>" : "预览 <b>"))
+    + a.sel + "</b> 后续 " + a.moves.length + " 手"
+    + (trial ? "" : " · 移开指针还原");
+  document.getElementById("texit").hidden = !trial;
+}
+/* 只切行的高亮, 不重建 DOM —— 否则鼠标下的节点被换掉, hover 会抖 */
+function markRows() {
+  const a = shown();
+  document.querySelectorAll(".rrow").forEach(el => {
+    el.classList.toggle("on", !!trial && trial.sel === el.dataset.mv);
+    el.classList.toggle("hv", !trial && !!a && a.sel === el.dataset.mv);
+  });
+}
+function toggleTrial(mv, i) {
+  if (trial && trial.sel === mv) { trial = null; }
+  else { trial = buildTrial(mv, i); hover = null; }
+  renderBoard(); syncBar(); markRows();
+}
+function setHover(mv, i) {
+  if (trial) return;                                   // 弈客: 已点选时 hover 不生效
+  if ((hover && hover.sel === mv) || (!hover && !mv)) return;
+  hover = mv ? buildTrial(mv, i) : null;
+  renderBoard(); syncBar(); markRows();
+}
+function exitTrial() {
+  trial = null; hover = null;
+  renderBoard(); syncBar(); markRows();
+}
+function nextColor() {
+  const hcp = D.meta.initialStones.length > 0 && D.meta.handicap > 0;
+  return hcp ? (cur % 2 === 1 ? "B" : "W") : (cur % 2 === 0 ? "B" : "W");
+}
+
+/* ── 胜率曲线 ── */
+const svg = document.getElementById("chart"), tip = document.getElementById("tip");
+const CW = 480, CH = 200, PL = 30, PR = 8, PT = 8, PB = 18;
+const plotW = CW - PL - PR, plotH = CH - PT - PB;
+const xAt = i => PL + (NM ? i / NM : 0) * plotW;
+const yAt = w => PT + (1 - w) * plotH;
+const BL = D.quality.map((q, i) => ({ n: i + 1, lost: q.lostWinrate, color: D.moves[i].color,
+    best: q.bestMove, gtp: D.moves[i].gtp, sev: sev(q.lostWinrate) })).filter(b => b.lost >= WARN);
+function buildChart() {
+  svg.setAttribute("viewBox", "0 0 " + CW + " " + CH);
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  svg.textContent = "";
+  let up = "M" + xAt(0) + "," + yAt(.5), dn = "M" + xAt(0) + "," + yAt(.5);
+  for (let i = 0; i <= NM; i++) {
+    const w = wr(i);
+    up += "L" + xAt(i) + "," + yAt(Math.max(.5, w));
+    dn += "L" + xAt(i) + "," + yAt(Math.min(.5, w));
+  }
+  up += "L" + xAt(NM) + "," + yAt(.5) + "Z"; dn += "L" + xAt(NM) + "," + yAt(.5) + "Z";
+  svg.appendChild(el("path", { d: dn, fill: "var(--chart-w)" }));
+  svg.appendChild(el("path", { d: up, fill: "var(--chart-b)", "fill-opacity": ".88" }));
+  [0, .25, .75, 1].forEach(v => {
+    svg.appendChild(el("line", { x1: PL, x2: PL + plotW, y1: yAt(v), y2: yAt(v), stroke: "var(--line)", "stroke-width": ".6" }));
+    const t = el("text", { x: PL - 5, y: yAt(v) + 3, "text-anchor": "end" });
+    t.textContent = Math.round(v * 100) + "%"; svg.appendChild(t);
+  });
+  svg.appendChild(el("line", { x1: PL, x2: PL + plotW, y1: yAt(.5), y2: yAt(.5), stroke: "var(--ink-3)", "stroke-width": ".9", "stroke-dasharray": "3 3" }));
+  const step = NM > 180 ? 50 : NM > 80 ? 25 : 10;
+  for (let n = 0; n <= NM; n += step) {
+    const t = el("text", { x: xAt(n), y: CH - 5, "text-anchor": n === 0 ? "start" : "middle" });
+    t.textContent = n; svg.appendChild(t);
+  }
+  let line = "";
+  for (let i = 0; i <= NM; i++) line += (i ? "L" : "M") + xAt(i) + "," + yAt(wr(i));
+  svg.appendChild(el("path", { d: line, fill: "none", stroke: "var(--ink)", "stroke-width": "1.5", "stroke-opacity": ".7", "stroke-linejoin": "round" }));
+  BL.forEach(b => svg.appendChild(el("line", {
+    x1: xAt(b.n), x2: xAt(b.n), y1: yAt(wr(b.n)), y2: yAt(wr(b.n - 1)),
+    stroke: levelColor(b.lost),
+    "stroke-width": b.lost >= BAD ? "2.4" : "1.7", "stroke-linecap": "round" })));
+  const mk = el("line", { id: "cursor", y1: PT, y2: PT + plotH, stroke: "var(--accent)", "stroke-width": "1.2" });
+  mk.setAttribute("x1", xAt(cur)); mk.setAttribute("x2", xAt(cur)); svg.appendChild(mk);
+  const hd = el("circle", { id: "cdot", r: "3.4", fill: "var(--accent)", stroke: "var(--card)", "stroke-width": "1.5" });
+  hd.setAttribute("cx", xAt(cur)); hd.setAttribute("cy", yAt(wr(cur))); svg.appendChild(hd);
+}
+function moveFromEvent(e) {
+  const b = svg.getBoundingClientRect();
+  const x = ((e.touches ? e.touches[0].clientX : e.clientX) - b.left) / b.width * CW;
+  return Math.max(0, Math.min(NM, Math.round((x - PL) / plotW * NM)));
+}
+svg.addEventListener("mousemove", e => {
+  const n = moveFromEvent(e), b = svg.getBoundingClientRect(), w = wr(n);
+  tip.style.opacity = "1";
+  tip.style.left = (xAt(n) / CW * b.width) + "px";
+  tip.style.top = (yAt(w) / CH * b.height - 8) + "px";
+  tip.textContent = (n === 0 ? "开局" : "第 " + n + " 手") + " · 黑 " + (w * 100).toFixed(1) + "% · "
+    + fmtScore(D.analysis[n] ? D.analysis[n].scoreLead : 0);
+});
+svg.addEventListener("mouseleave", () => tip.style.opacity = "0");
+svg.addEventListener("click", e => goto(moveFromEvent(e)));
+
+/* ── 失着榜 ── */
+function buildLists() {
+  ["B", "W"].forEach(col => {
+    const host = document.getElementById("list" + col);
+    const rows = BL.filter(b => b.color === col).sort((a, b) => b.lost - a.lost).slice(0, 8);
+    if (!rows.length) { host.innerHTML = '<div class="none">无损失超过 10% 的手</div>'; return; }
+    const bg = col === "B" ? "radial-gradient(circle at 34% 30%, var(--stone-b-hi), var(--stone-b) 62%)"
+                           : "radial-gradient(circle at 34% 30%, #fff, var(--stone-w-lo))";
+    const bd = col === "B" ? "" : ";border:1px solid var(--line)";
+    host.innerHTML = rows.map(b =>
+      '<div class="mrow" data-n="' + b.n + '"><span class="st" style="background:' + bg + bd + '"></span>'
+      + '<span class="hn">' + b.n + '</span><span class="co">' + b.gtp + '</span>'
+      + '<span class="ls" style="color:' + levelColor(b.lost) + '">-' + (b.lost * 100).toFixed(0) + '%</span>'
+      + '<span class="bm">推荐 ' + (b.best || "—") + '</span></div>').join("");
+    host.querySelectorAll(".mrow").forEach(el => el.addEventListener("click", () => goto(Number(el.dataset.n))));
+  });
+}
+function hiLists() {
+  document.querySelectorAll(".mrow").forEach(el => el.classList.toggle("on", Number(el.dataset.n) === cur));
+}
+
+/* ── 分栏切换 ── */
+document.querySelectorAll('[role="tab"]').forEach((btn, i) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll('[role="tab"]').forEach((b, j) => {
+      b.setAttribute("aria-selected", String(i === j));
+      document.getElementById("p" + j).hidden = i !== j;
+    });
+  });
+});
+
+/* ── 导航 ── */
+function goto(n) {
+  cur = Math.max(0, Math.min(NM, n));
+  trial = null; hover = null;
+  document.getElementById("tbar").hidden = true;
+  const S = renderBoard();
+  renderBar(); renderRecommend(); syncBar();
+  const c = document.getElementById("cursor"), d = document.getElementById("cdot");
+  if (c) { c.setAttribute("x1", xAt(cur)); c.setAttribute("x2", xAt(cur)); }
+  if (d) { d.setAttribute("cx", xAt(cur)); d.setAttribute("cy", yAt(wr(cur))); }
+  hiLists();
+}
+document.getElementById("texit").onclick = exitTrial;
+const STEP = 5;
+document.getElementById("first").onclick = () => goto(0);
+document.getElementById("back5").onclick = () => goto(cur - STEP);
+document.getElementById("prev").onclick = () => goto(cur - 1);
+document.getElementById("next").onclick = () => goto(cur + 1);
+document.getElementById("fwd5").onclick = () => goto(cur + STEP);
+document.getElementById("last").onclick = () => goto(NM);
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowLeft") { goto(cur - (e.shiftKey ? STEP : 1)); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { goto(cur + (e.shiftKey ? STEP : 1)); e.preventDefault(); }
+  else if (e.key === "Home") { goto(0); e.preventDefault(); }
+  else if (e.key === "End") { goto(NM); e.preventDefault(); }
+});
+
+/* ── 导出棋谱 ──
+   下载走 Blob + <a download>。注意: 在 claude.ai 的 artifact 预览里
+   页面自己发起的下载会被沙箱拦掉, 所以同时留了「复制棋谱」兜底;
+   GitHub Pages 这种普通网页下两个都正常。 */
+const msg = (t) => {
+  const el = document.getElementById("actmsg");
+  el.textContent = t;
+  clearTimeout(msg._t);
+  msg._t = setTimeout(() => { el.textContent = ""; }, 4000);
+};
+document.getElementById("dlsgf").onclick = () => {
+  if (!D.sgf) { msg("这份页面里没有棋谱数据"); return; }
+  try {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([D.sgf], { type: "application/x-go-sgf;charset=utf-8" }));
+    a.download = D.file || "game.sgf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    msg("已导出 " + (D.file || "game.sgf") + "　若没反应请改用「复制棋谱」");
+  } catch (e) {
+    msg("导出失败, 请改用「复制棋谱」: " + e.message);
+  }
+};
+document.getElementById("cpsgf").onclick = async () => {
+  if (!D.sgf) { msg("这份页面里没有棋谱数据"); return; }
+  try {
+    await navigator.clipboard.writeText(D.sgf);
+    msg("棋谱已复制到剪贴板");
+  } catch {
+    // 剪贴板不可用时退一步: 弹一个可全选的文本框
+    const ta = document.createElement("textarea");
+    ta.value = D.sgf;
+    ta.readOnly = true;
+    ta.setAttribute("style",
+      "position:fixed;left:5%;top:15%;width:90%;height:50%;z-index:99;font:12px monospace;padding:10px");
+    document.body.appendChild(ta);
+    ta.select();
+    msg("剪贴板不可用, 已弹出文本框: 全选复制, 点别处关闭");
+    ta.addEventListener("blur", () => ta.remove());
+  }
+};
+
+/* ── 启动 ── */
+sizeBoard(); buildChart(); buildLists(); goto(NM);
+let rt;
+window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { sizeBoard(); renderBoard(); }, 120); });
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => renderBoard());
+</script>
