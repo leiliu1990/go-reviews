@@ -136,7 +136,8 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: var(-
 .vsbar .r { background: var(--bar-w); color: #000000; }
 
 /* ── 棋盘 ── */
-.boardwrap { padding: 12px 16px 0; }
+/* 棋盘满宽 —— 手机上棋盘是主体, 不留左右边距 (.app 最宽 640px, 桌面端也刚好) */
+.boardwrap { padding: 10px 0 0; }
 .bshell { position: relative; width: 100%; aspect-ratio: 1; }
 #board { width: 100%; height: 100%; display: block; touch-action: manipulation; }
 
@@ -154,17 +155,38 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: var(-
 @media (max-width: 420px) { .hud .sc { margin-left: 0; } }
 
 /* ── 走子控件 ── */
-.transport { display: flex; align-items: center; gap: 7px; padding: 10px 16px 12px; }
+/* 走子控件: 一排大按钮。原来的 range 滑杆在手机上太难精确拖,
+   换成 ±1 / ±5 / 首尾 七个键; 跳转仍可点胜率曲线。
+   每个键高 46px —— 比 Apple HIG 的 44pt 最小触摸目标略大。 */
+.transport {
+  display: flex; align-items: stretch; gap: 5px;
+  padding: 10px 10px 12px;
+}
 button.nav {
-  font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink);
-  background: var(--row); border: 1px solid var(--line); border-radius: 5px;
-  padding: 7px 10px; cursor: pointer; line-height: 1;
+  flex: 1 1 0; min-width: 0; min-height: 46px;
+  font-family: var(--mono); font-size: 17px; font-weight: 600; color: var(--ink);
+  background: var(--row); border: 1px solid var(--line); border-radius: 7px;
+  padding: 0 2px; cursor: pointer; line-height: 1;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  display: grid; place-items: center;
 }
 button.nav:hover { border-color: var(--accent); color: var(--accent); }
+button.nav:active { background: var(--row-alt); transform: scale(.96); }
 button.nav:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-#scrub { flex: 1; min-width: 0; accent-color: var(--ink-2); cursor: pointer; }
-.cnt { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--ink-3); min-width: 68px; text-align: right; }
-.cnt b { color: var(--ink); font-weight: 600; }
+/* 「下一手」是用得最多的键: 给两倍宽度并做成主操作色。
+   权重 2 + 其余 5 个各 1 = 7 份; 360px 屏上其余键仍有 ~45px, 不低于 44pt 触摸目标 */
+button.nav#next {
+  flex: 2 1 0; font-size: 20px;
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+button.nav#next:hover { filter: brightness(1.08); color: #fff; }
+button.nav#next:active { background: var(--accent); }
+/* 试下条里的「返回实战」不该跟着走子键一起拉满 */
+.tbar button.nav {
+  flex: 0 0 auto; min-height: 34px; font-size: 13px; padding: 0 12px;
+  font-family: var(--sans);
+}
+.hud .n { font-weight: 600; color: var(--ink); }
 
 /* ── 分栏 ── */
 .tabs { display: flex; background: var(--tab-bg); border-top: 1px solid var(--line); }
@@ -322,12 +344,12 @@ footer a:hover { text-decoration: underline; }
   </div>
 
   <div class="transport">
-    <button class="nav" id="first" title="第一手 (Home)">|&lt;</button>
-    <button class="nav" id="prev" title="上一手 (←)">&lt;</button>
-    <input type="range" id="scrub" min="0" max="1" value="0" step="1" aria-label="手数">
-    <button class="nav" id="next" title="下一手 (→)">&gt;</button>
-    <button class="nav" id="last" title="最后一手 (End)">&gt;|</button>
-    <div class="cnt"><b id="cnum">0</b>/139</div>
+    <button class="nav" id="first" title="回到开局 (Home)" aria-label="回到开局">|&lt;</button>
+    <button class="nav" id="back5" title="退五手 (Shift+←)" aria-label="退五手">&lt;&lt;</button>
+    <button class="nav" id="prev" title="上一手 (←)" aria-label="上一手">&lt;</button>
+    <button class="nav" id="next" title="下一手 (→)" aria-label="下一手">&gt;</button>
+    <button class="nav" id="fwd5" title="进五手 (Shift+→)" aria-label="进五手">&gt;&gt;</button>
+    <button class="nav" id="last" title="跳到最后 (End)" aria-label="跳到最后">&gt;|</button>
   </div>
 
   <div class="tabs" role="tablist">
@@ -793,7 +815,8 @@ function renderHud(S) {
   if (cur === 0) {
     pill.className = "pill"; pill.style.background = LEVEL_COLORS[1]; pill.style.color = "#fff";
     pill.textContent = "开局";
-    mv.textContent = "—"; best.textContent = "";
+    mv.innerHTML = '第 <span class="n">0</span>/' + NM + " 手";
+    best.textContent = "";
     return;
   }
   const m = D.moves[cur - 1], q = D.quality[cur - 1];
@@ -802,7 +825,8 @@ function renderHud(S) {
   pill.style.background = levelColor(q.lostWinrate);
   pill.style.color = "#fff";
   pill.textContent = sv === "bad" ? "失着" : sv === "warn" ? "缓手" : "好手";
-  mv.innerHTML = (m.color === "B" ? "黑" : "白") + " <b>" + (m.gtp === "pass" ? "弃手" : m.gtp)
+  mv.innerHTML = '第 <span class="n">' + cur + "</span>/" + NM + " 手 · "
+    + (m.color === "B" ? "黑" : "白") + " <b>" + (m.gtp === "pass" ? "弃手" : m.gtp)
     + "</b> " + (own >= 0 ? "+" : "") + own.toFixed(1) + "%";
   best.innerHTML = (sv === "good" || !q.bestMove) ? "" : "推荐 <b>" + q.bestMove + "</b> ▲";
 }
@@ -906,29 +930,28 @@ function goto(n) {
   document.getElementById("tbar").hidden = true;
   const S = renderBoard();
   renderBar(); renderHud(S); renderRecommend(); syncBar();
-  document.getElementById("cnum").textContent = cur;
-  document.getElementById("scrub").value = cur;
   const c = document.getElementById("cursor"), d = document.getElementById("cdot");
   if (c) { c.setAttribute("x1", xAt(cur)); c.setAttribute("x2", xAt(cur)); }
   if (d) { d.setAttribute("cx", xAt(cur)); d.setAttribute("cy", yAt(wr(cur))); }
   hiLists();
 }
 document.getElementById("texit").onclick = exitTrial;
+const STEP = 5;
 document.getElementById("first").onclick = () => goto(0);
+document.getElementById("back5").onclick = () => goto(cur - STEP);
 document.getElementById("prev").onclick = () => goto(cur - 1);
 document.getElementById("next").onclick = () => goto(cur + 1);
+document.getElementById("fwd5").onclick = () => goto(cur + STEP);
 document.getElementById("last").onclick = () => goto(NM);
-document.getElementById("scrub").oninput = e => goto(Number(e.target.value));
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT") return;
-  if (e.key === "ArrowLeft") { goto(cur - 1); e.preventDefault(); }
-  else if (e.key === "ArrowRight") { goto(cur + 1); e.preventDefault(); }
+  if (e.key === "ArrowLeft") { goto(cur - (e.shiftKey ? STEP : 1)); e.preventDefault(); }
+  else if (e.key === "ArrowRight") { goto(cur + (e.shiftKey ? STEP : 1)); e.preventDefault(); }
   else if (e.key === "Home") { goto(0); e.preventDefault(); }
   else if (e.key === "End") { goto(NM); e.preventDefault(); }
 });
 
 /* ── 启动 ── */
-document.getElementById("scrub").max = NM;
 sizeBoard(); buildChart(); buildLists(); goto(NM);
 let rt;
 window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { sizeBoard(); renderBoard(); }, 120); });
