@@ -1,23 +1,28 @@
 <meta charset="utf-8">
-<!-- viewport 不能省: 作为 Artifact 发布时平台会自带一个, 但产物也会被当独立页面打开
-     (GitHub Pages / 本地文件), 那时没有它 iOS 会按 980px 宽排版再整体缩到屏宽,
-     缩放比约 0.37 —— 字和棋盘都会小得没法看。 -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- charset 必须留在文档最前面。发布成 Artifact 时平台自带编码声明, 这行多余但无害;
-     而产物同样会被当本地文件直接打开 (微信发文件那条路), 那时没有任何编码声明,
-     浏览器只能猜 —— 中文 Windows 上会猜成 GBK, 中文全部乱码。
-     编码嗅探只扫文档前 1024 字节, 且不要求在文档头部区域内, 所以放这里就够。 -->
 <title>棋手1 vs 棋手2</title>
-<!-- 给微信/其他 IM 的链接卡片用: 爬虫不执行 JS, 只能读这些静态标签。
-     og:url 与 og:image 依赖最终发布地址, 由 publish.sh 在发布时注入。 -->
 <meta name="description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 139 手 · 棋谱未记录结果；KataGo 分析：好手 126，缓手 11，失着 2；可逐手走、看推荐着点、试下后续手顺">
 <meta property="og:type" content="article">
 <meta property="og:title" content="棋手1 vs 棋手2">
 <meta property="og:description" content="2026-11-07 · 中国规则 · 贴 7.5 目 · 139 手 · 棋谱未记录结果；KataGo 分析：好手 126，缓手 11，失着 2；可逐手走、看推荐着点、试下后续手顺">
 <meta property="og:site_name" content="围棋复盘">
 <meta property="og:url" content="https://leiliu1990.github.io/go-reviews/20261107-lianqi1.html">
+<meta property="og:image" content="https://leiliu1990.github.io/go-reviews/20261107-lianqi1.png">
+<meta property="og:image:width" content="1000">
+<meta property="og:image:height" content="525">
+<meta itemprop="image" content="https://leiliu1990.github.io/go-reviews/20261107-lianqi1.png">
 <style>
-/* 弈客围棋直播室形制: 浅灰实用风, 黑白胜率条是标志元素 */
+/* 弈客围棋直播室形制: 浅灰实用风, 黑白胜率条是标志元素
+ *
+ * 文档开头那四行标签都是必须的, 且之前不能插任何注释:
+ *  - charset   产物会被当本地文件直接打开 (微信发文件那条路), 那时没有编码声明,
+ *              浏览器只能猜 —— 中文 Windows 会猜成 GBK, 中文全乱码。
+ *  - viewport  缺它时 iOS 按 980px 宽排版再缩到屏宽 (约 0.37 倍), 字小到没法看。
+ *              Artifact 平台会自带, 独立页面 (GitHub Pages / 本地) 不会。
+ *  - title / description / og:*  微信等 IM 的链接卡片靠它们 —— 爬虫不执行 JS,
+ *              看不到 canvas 画的棋盘。部分爬虫只扫前 1024 字节, 所以本段说明
+ *              放在这里而不是头部。og:url 与 og:image 由 publish.sh 发布时注入。
+ */
 :root {
   --page: #ECECEC;
   --card: #FFFFFF;
